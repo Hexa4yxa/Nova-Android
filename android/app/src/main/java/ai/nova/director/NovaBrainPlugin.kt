@@ -1,4 +1,8 @@
 package ai.nova.director
+import com.getcapacitor.ActivityResult
+import com.getcapacitor.annotation.ActivityCallback
+import android.app.Activity
+import android.content.Intent
 
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -21,6 +25,27 @@ class NovaBrainPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun prepare(call: PluginCall) {
+        val model = java.io.File(context.filesDir, "nova-model.gguf")
+
+        if (!model.isFile) {
+            importModel(call)
+            return
+        }
+
+        scope.launch {
+            try {
+                brain.loadModel(model.absolutePath)
+                val result = JSObject()
+                result.put("loaded", true)
+                call.resolve(result)
+            } catch (e: Exception) {
+                call.reject("Ошибка запуска Qwen", e)
+            }
+        }
+    }
+
+    @PluginMethod
     fun status(call: PluginCall) {
         try {
             val result = JSObject()
@@ -29,6 +54,55 @@ class NovaBrainPlugin : Plugin() {
             call.resolve(result)
         } catch (e: Exception) {
             call.reject("NOVA status failed", e)
+        }
+    }
+
+    @PluginMethod
+    fun importModel(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        startActivityForResult(call, intent, "modelSelected")
+    }
+
+    @ActivityCallback
+    private fun modelSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            call.reject("Выбор модели отменён")
+            return
+        }
+
+        scope.launch {
+            try {
+                val destination = java.io.File(context.filesDir, "nova-model.gguf")
+                val temporary = java.io.File(context.filesDir, "nova-model.tmp")
+
+                try {
+                    context.contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "Не удалось открыть GGUF" }
+                        temporary.outputStream().use { output ->
+                            input.copyTo(output, 1024 * 1024)
+                        }
+                    }
+
+                    if (!temporary.renameTo(destination)) {
+                        throw IllegalStateException("Не удалось сохранить модель")
+                    }
+                } finally {
+                    temporary.delete()
+                }
+
+                brain.loadModel(destination.absolutePath)
+
+                val response = JSObject()
+                response.put("loaded", true)
+                response.put("path", destination.absolutePath)
+                call.resolve(response)
+            } catch (e: Exception) {
+                call.reject("Ошибка импорта модели", e)
+            }
         }
     }
 
