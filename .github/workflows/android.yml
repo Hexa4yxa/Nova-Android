@@ -28,7 +28,12 @@ jobs:
           cache: npm
 
       - name: Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          echo "Android SDK found"
+
 
       - name: Install dependencies
         run: npm ci
