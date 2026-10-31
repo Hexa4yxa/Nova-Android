@@ -9,7 +9,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:#0c101b;color:#f4f5ff;font-family:Arial,sans-serif}
 .app{height:100dvh;display:flex;flex-direction:column;max-width:720px;margin:auto}
-header{padding:22px 18px;background:#151b2b;border-bottom:1px solid #293248}
+header{padding:calc(22px + env(safe-area-inset-top, 0px)) 18px 22px;background:#151b2b;border-bottom:1px solid #293248}
 .chat-actions{display:flex;justify-content:flex-end;padding:6px 0 12px}
 .clear-history{background:#30384c;color:#d8def0;font-size:12px;padding:9px 12px;border-radius:10px}
 
