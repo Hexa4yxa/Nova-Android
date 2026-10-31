@@ -81,10 +81,18 @@ async function send(){
  showChat();
 
  try{
-  const response=await fetch('http://127.0.0.1:8095/chat',{
+  const response=await fetch('http://127.0.0.1:8095/v1/chat/completions',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({message:text})
+   body:JSON.stringify({
+    messages:[
+     {role:'system',content:'Ты NOVA, умная, уверенная, немного дерзкая девушка-ассистент. Отвечай естественно на русском языке.'},
+     {role:'user',content:text}
+    ],
+    chat_template_kwargs:{enable_thinking:false},
+    max_tokens:200,
+    temperature:0.7
+   })
   });
 
   const data=await response.json();
@@ -93,7 +101,7 @@ async function send(){
    throw new Error(data.error || 'Ошибка сервера');
   }
 
-  waiting.text=data.reply || 'NOVA вернула пустой ответ.';
+  waiting.text=data.choices?.[0]?.message?.content || 'NOVA вернула пустой ответ.';
  }catch(error){
   waiting.text='❌ Ошибка связи с NOVA: '+error.message;
  }finally{
