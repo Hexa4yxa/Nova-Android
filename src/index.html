@@ -129,9 +129,18 @@ async function send(){
     throw new Error('Android-мост NovaBrain недоступен');
   }
 
-  const result=await brain.status();
+  let result=await brain.status();
+
   if(result.engine !== 'ModelReady'){
-    throw new Error('Локальная модель ещё не загружена: '+result.engine);
+    waiting.text='🧠 NOVA запускает локальный мозг...';
+    showChat();
+
+    await brain.prepare();
+    result=await brain.status();
+
+    if(result.engine !== 'ModelReady'){
+      throw new Error('Модель не готова: '+result.engine);
+    }
   }
 
   const answer=await brain.chat({message:text});
