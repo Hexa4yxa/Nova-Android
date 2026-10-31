@@ -1,0 +1,8 @@
+{
+  "appId": "ai.nova.director",
+  "appName": "NOVA AI",
+  "webDir": "src",
+  "server": {
+    "androidScheme": "https"
+  }
+}

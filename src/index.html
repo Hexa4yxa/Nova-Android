@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NOVA AI</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0c101b;color:#f4f5ff;font-family:Arial,sans-serif}
+.app{height:100dvh;display:flex;flex-direction:column;max-width:720px;margin:auto}
+header{padding:22px 18px;background:#151b2b;border-bottom:1px solid #293248}
+.brand{font-size:23px;font-weight:bold;letter-spacing:2px}
+.subtitle{font-size:12px;color:#a7b1cc;margin-top:5px}
+main{flex:1;overflow:auto;padding:18px}
+.message{padding:14px 16px;border-radius:17px;max-width:88%;margin-bottom:14px;line-height:1.5}
+.nova{background:#242b40}
+.user{background:#344c87;margin-left:auto}
+.bottom{background:#151b2b;border-top:1px solid #293248;padding:12px}
+.compose{display:flex;gap:9px}
+input{flex:1;min-width:0;border:1px solid #39435e;background:#20283b;color:white;border-radius:22px;padding:14px;font-size:15px}
+button{border:0;background:#6d70f5;color:white;border-radius:16px;padding:0 18px;font-size:18px}
+nav{display:flex;justify-content:space-around;padding:14px 0 6px;color:#b8c1dc;font-size:13px}
+nav span{cursor:pointer;padding:5px}
+nav .active{color:#999bff;font-weight:bold}
+.panel{background:#20283b;border-radius:15px;padding:18px;margin-bottom:12px}
+.small{color:#a7b1cc;font-size:13px}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+<div class="brand">✦ NOVA AI</div>
+<div class="subtitle">Твой ИИ-режиссёр · Прототип интерфейса</div>
+</header>
+<main id="content"></main>
+<div class="bottom">
+<div class="compose" id="compose">
+<input id="message" placeholder="Напиши задачу NOVA...">
+<button id="send" aria-label="Отправить">➤</button>
+</div>
+<nav>
+<span class="active" data-tab="chat">💬 Чат</span>
+<span data-tab="projects">🎬 Проекты</span>
+<span data-tab="tools">🧠 Инструменты</span>
+</nav>
+</div>
+</div>
+<script>
+const content=document.getElementById('content');
+const compose=document.getElementById('compose');
+const input=document.getElementById('message');
+const history=[
+{who:'nova',text:'Привет! Я NOVA. Скоро здесь будет мой настоящий мозг. А пока мы создаём мой интерфейс. 🎬'}
+];
+function addMessage(who,text){
+ const el=document.createElement('div');
+ el.className='message '+who;
+ el.textContent=text;
+ content.appendChild(el);
+}
+function showChat(){
+ content.replaceChildren();
+ history.forEach(m=>addMessage(m.who,m.text));
+ content.scrollTop=content.scrollHeight;
+}
+let busy=false;
+
+async function send(){
+ const text=input.value.trim();
+ if(!text || busy)return;
+
+ busy=true;
+ document.getElementById('send').disabled=true;
+
+ history.push({who:'user',text});
+ input.value='';
+
+ const waiting={who:'nova',text:'🎬 NOVA думает...'};
+ history.push(waiting);
+ showChat();
+
+ try{
+  const response=await fetch('http://127.0.0.1:8095/chat',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({message:text})
+  });
+
+  const data=await response.json();
+
+  if(!response.ok){
+   throw new Error(data.error || 'Ошибка сервера');
+  }
+
+  waiting.text=data.reply || 'NOVA вернула пустой ответ.';
+ }catch(error){
+  waiting.text='❌ Ошибка связи с NOVA: '+error.message;
+ }finally{
+  busy=false;
+  document.getElementById('send').disabled=false;
+  showChat();
+ }
+}
+document.getElementById('send').onclick=send;
+input.addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+document.querySelectorAll('nav span').forEach(tab=>{
+ tab.onclick=()=>{
+  document.querySelectorAll('nav span').forEach(x=>x.classList.remove('active'));
+  tab.classList.add('active');
+  const selected=tab.dataset.tab;
+  compose.style.display=selected==='chat'?'flex':'none';
+  if(selected==='chat')return showChat();
+  content.replaceChildren();
+  const panel=document.createElement('div');
+  panel.className='panel';
+  if(selected==='projects'){
+   panel.textContent='🎬 Проекты NOVA';
+   const note=document.createElement('p');
+   note.className='small';
+   note.textContent='Здесь появятся реальные видео и результаты монтажа после подключения движка.';
+   panel.appendChild(note);
+  }else{
+   panel.textContent='🧠 Инструменты NOVA';
+   const note=document.createElement('p');
+   note.className='small';
+   note.textContent='Director, Vision, Dual Mind, Critic, Audio — подключение и проверка впереди.';
+   panel.appendChild(note);
+  }
+  content.appendChild(panel);
+ };
+});
+showChat();
+</script>
+</body>
+</html>

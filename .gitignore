@@ -1,0 +1,13 @@
+node_modules/
+.gradle/
+**/.gradle/
+**/build/
+.env
+.env.*
+*.keystore
+*.jks
+*.pem
+*.key
+local.properties
+*.log
+src/*backup*
