@@ -10,13 +10,16 @@
 body{margin:0;background:#0c101b;color:#f4f5ff;font-family:Arial,sans-serif}
 .app{height:100dvh;display:flex;flex-direction:column;max-width:720px;margin:auto}
 header{padding:22px 18px;background:#151b2b;border-bottom:1px solid #293248}
+.chat-actions{display:flex;justify-content:flex-end;padding:6px 0 12px}
+.clear-history{background:#30384c;color:#d8def0;font-size:12px;padding:9px 12px;border-radius:10px}
+
 .brand{font-size:23px;font-weight:bold;letter-spacing:2px}
 .subtitle{font-size:12px;color:#a7b1cc;margin-top:5px}
 main{flex:1;overflow:auto;padding:18px}
 .message{padding:14px 16px;border-radius:17px;max-width:88%;margin-bottom:14px;line-height:1.5}
 .nova{background:#242b40}
 .user{background:#344c87;margin-left:auto}
-.bottom{background:#151b2b;border-top:1px solid #293248;padding:12px}
+.bottom{background:#151b2b;border-top:1px solid #293248;padding:12px 12px max(16px, env(safe-area-inset-bottom))}
 .compose{display:flex;gap:9px}
 input{flex:1;min-width:0;border:1px solid #39435e;background:#20283b;color:white;border-radius:22px;padding:14px;font-size:15px}
 button{border:0;background:#6d70f5;color:white;border-radius:16px;padding:0 18px;font-size:18px}
@@ -35,24 +38,46 @@ nav .active{color:#999bff;font-weight:bold}
 </header>
 <main id="content"></main>
 <div class="bottom">
-<div class="compose" id="compose">
-<input id="message" placeholder="Напиши задачу NOVA...">
-<button id="send" aria-label="Отправить">➤</button>
-</div>
 <nav>
 <span class="active" data-tab="chat">💬 Чат</span>
 <span data-tab="projects">🎬 Проекты</span>
 <span data-tab="tools">🧠 Инструменты</span>
 </nav>
+<div class="compose" id="compose">
+<input id="message" placeholder="Напиши задачу NOVA...">
+<button id="send" aria-label="Отправить">➤</button>
+</div>
 </div>
 </div>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
 const input=document.getElementById('message');
-const history=[
-{who:'nova',text:'Привет! Я NOVA. Скоро здесь будет мой настоящий мозг. А пока мы создаём мой интерфейс. 🎬'}
-];
+const welcome={who:'nova',text:'Привет! Я NOVA. Твой локальный ИИ-режиссёр. 🎬'};
+let savedHistory=[];
+try{
+ const stored=JSON.parse(localStorage.getItem('nova_chat_history') || '[]');
+ if(Array.isArray(stored)){
+  savedHistory=stored.filter(m=>
+   m && (m.who==='user' || m.who==='nova') &&
+   typeof m.text==='string' &&
+   !m.text.startsWith('❌') &&
+   m.text!=='🎬 NOVA думает...'
+  ).slice(-100);
+ }
+}catch(e){ console.warn('История не загружена',e); }
+const history=[welcome,...savedHistory];
+
+function saveHistory(){
+ try{
+  localStorage.setItem('nova_chat_history',
+   JSON.stringify(history.slice(1).filter(m=>
+    m.text!=='🎬 NOVA думает...' &&
+    !m.text.startsWith('❌')
+   ).slice(-100))
+  );
+ }catch(e){ console.warn('История не сохранена',e); }
+}
 function addMessage(who,text){
  const el=document.createElement('div');
  el.className='message '+who;
@@ -61,6 +86,24 @@ function addMessage(who,text){
 }
 function showChat(){
  content.replaceChildren();
+
+ const actions=document.createElement('div');
+ actions.className='chat-actions';
+
+ const clear=document.createElement('button');
+ clear.className='clear-history';
+ clear.textContent='🗑 Очистить историю';
+ clear.disabled=busy;
+ clear.onclick=()=>{
+  if(!confirm('Удалить всю переписку с NOVA?'))return;
+  history.splice(1);
+  saveHistory();
+  showChat();
+ };
+
+ actions.appendChild(clear);
+ content.appendChild(actions);
+
  history.forEach(m=>addMessage(m.who,m.text));
  content.scrollTop=content.scrollHeight;
 }
@@ -86,11 +129,19 @@ async function send(){
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({
     messages:[
-     {role:'system',content:'Ты NOVA, умная, уверенная, немного дерзкая девушка-ассистент. Отвечай естественно на русском языке.'},
+     {role:'system',content:'Ты NOVA, умная, уверенная, немного дерзкая девушка-ассистент. Отвечай естественно на русском языке. Обычно отвечай кратко, в 1–3 предложениях. Если попросят подробности, объясняй подробнее.'},
+     ...history
+       .slice(1, -2)
+       .filter(m => m.text && !m.text.startsWith('❌'))
+       .slice(-9)
+       .map(m => ({
+         role: m.who === 'user' ? 'user' : 'assistant',
+         content: m.text
+       })),
      {role:'user',content:text}
     ],
     chat_template_kwargs:{enable_thinking:false},
-    max_tokens:200,
+    max_tokens:80,
     temperature:0.7
    })
   });
@@ -103,9 +154,12 @@ async function send(){
 
   waiting.text=data.choices?.[0]?.message?.content || 'NOVA вернула пустой ответ.';
  }catch(error){
-  waiting.text='❌ Ошибка связи с NOVA: '+error.message;
+  waiting.text=error instanceof TypeError
+   ? '❌ Нет связи с локальным мозгом NOVA. Проверь, запущен ли сервер Qwen3 в Buddy.'
+   : '❌ Ошибка NOVA: '+error.message;
  }finally{
   busy=false;
+  saveHistory();
   document.getElementById('send').disabled=false;
   showChat();
  }
