@@ -1,5 +1,5 @@
 package ai.nova.director
-import com.getcapacitor.ActivityResult
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.annotation.ActivityCallback
 import android.app.Activity
 import android.content.Intent
