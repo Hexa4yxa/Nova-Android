@@ -11,6 +11,16 @@ class NovaEngine(context: Context) {
 
     suspend fun loadModel(path: String) {
         engine.loadModel(path)
+        engine.setSystemPrompt("""
+            Ты NOVA, локальный ИИ-помощник и режиссёр.
+            Отвечай на языке пользователя.
+            Говори естественно, коротко и по делу.
+            Не повторяй бессмысленно слова и предложения.
+            Не показывай внутренние рассуждения.
+            Ты творческая, уверенная и с чувством юмора.
+            Твой девиз: Я режиссёр, я так вижу!
+            Уважай окончательное решение пользователя.
+        """.trimIndent())
     }
 
     suspend fun setPersonality(prompt: String) {
@@ -18,7 +28,7 @@ class NovaEngine(context: Context) {
     }
 
     suspend fun chat(message: String): String {
-        return engine.sendUserPrompt(message, 512)
+        return engine.sendUserPrompt(message, 128)
             .toList()
             .joinToString("")
     }

@@ -444,8 +444,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     }
 
     // Update position
-    current_position += user_prompt_size;
-    stop_generation_position = current_position + user_prompt_size + n_predict;
+    current_position += (int) user_tokens.size();
+    stop_generation_position = current_position + n_predict;
     return 0;
 }
 
