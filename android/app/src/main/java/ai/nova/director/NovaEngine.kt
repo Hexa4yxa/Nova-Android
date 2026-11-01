@@ -28,7 +28,7 @@ class NovaEngine(context: Context) {
     }
 
     suspend fun chat(message: String): String {
-        return engine.sendUserPrompt(message, 128)
+        return engine.sendUserPrompt(message, 256)
             .toList()
             .joinToString("")
     }

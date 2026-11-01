@@ -107,6 +107,10 @@ static llama_context *init_context(llama_model *model, const int n_ctx = DEFAULT
 static common_sampler *new_sampler(float temp) {
     common_params_sampling sparams;
     sparams.temp = temp;
+    sparams.penalty_repeat = 1.12f;
+    sparams.penalty_last_n = 128;
+    sparams.top_p = 0.90f;
+    sparams.min_p = 0.05f;
     return common_sampler_init(g_model, sparams);
 }
 
@@ -291,7 +295,7 @@ static std::string chat_add_and_format(const std::string &role, const std::strin
     new_msg.role = role;
     new_msg.content = content;
     auto formatted = common_chat_format_single(
-            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ false);
+            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ true);
     chat_msgs.push_back(new_msg);
     LOGi("%s: Formatted and added %s message: \n%s\n", __func__, role.c_str(), formatted.c_str());
     return formatted;
@@ -311,6 +315,7 @@ static void reset_short_term_states() {
     stop_generation_position = 0;
     cached_token_chars.clear();
     assistant_ss.str("");
+    assistant_ss.clear();
 }
 
 static int decode_tokens_in_batches(
@@ -367,7 +372,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
     std::string formatted_system_prompt(system_prompt);
 
     // Format system prompt if applicable
-    const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
+    const bool has_chat_template = (g_chat_templates != nullptr);
     if (has_chat_template) {
         formatted_system_prompt = chat_add_and_format(ROLE_SYSTEM, system_prompt);
     }
@@ -416,11 +421,13 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     std::string formatted_user_prompt(user_prompt);
 
     // Format user prompt if applicable
-    const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
+    const bool has_chat_template = (g_chat_templates != nullptr);
     if (has_chat_template) {
         formatted_user_prompt = chat_add_and_format(ROLE_USER, user_prompt);
     }
     env->ReleaseStringUTFChars(juser_prompt, user_prompt);
+
+    common_sampler_reset(g_sampler);
 
     // Decode formatted user prompts
     auto user_tokens = common_tokenize(g_context, formatted_user_prompt, has_chat_template, has_chat_template);
@@ -498,6 +505,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
     // Stop if reaching the marked position
     if (current_position >= stop_generation_position) {
         LOGw("%s: STOP: hitting stop position: %d", __func__, stop_generation_position);
+        chat_add_and_format(ROLE_ASSISTANT, assistant_ss.str());
         return nullptr;
     }
 
