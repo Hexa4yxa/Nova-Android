@@ -40,7 +40,7 @@ class NovaBrainPlugin : Plugin() {
                 result.put("loaded", true)
                 call.resolve(result)
             } catch (e: Exception) {
-                call.reject("Ошибка запуска Qwen", e)
+                call.reject("Ошибка запуска Qwen: " + e.toString(), e)
             }
         }
     }
@@ -101,7 +101,7 @@ class NovaBrainPlugin : Plugin() {
                 response.put("path", destination.absolutePath)
                 call.resolve(response)
             } catch (e: Exception) {
-                call.reject("Ошибка импорта модели", e)
+                call.reject("Ошибка импорта модели: " + e.toString(), e)
             }
         }
     }
