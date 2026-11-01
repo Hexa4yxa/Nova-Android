@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ggml-org/llama.cpp
-          ref: master
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
           path: llama.cpp
 
       - name: Java 21
