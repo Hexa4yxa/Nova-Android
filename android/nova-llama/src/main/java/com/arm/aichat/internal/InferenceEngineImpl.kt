@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -137,9 +138,11 @@ internal class InferenceEngineImpl private constructor(
                 _state.value = InferenceEngine.State.Initialized
                 Log.i(TAG, "Native library loaded! System info: \n${systemInfo()}")
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Failed to load native library", e)
-                throw e
+                _state.value = InferenceEngine.State.Error(
+                    if (e is Exception) e else RuntimeException(e)
+                )
             }
         }
     }
@@ -149,8 +152,24 @@ internal class InferenceEngineImpl private constructor(
      */
     override suspend fun loadModel(pathToModel: String) =
         withContext(llamaDispatcher) {
-            check(_state.value is InferenceEngine.State.Initialized) {
-                "Cannot load model in ${_state.value.javaClass.simpleName}!"
+            if (_state.value is InferenceEngine.State.Initializing ||
+                _state.value is InferenceEngine.State.Uninitialized) {
+                kotlinx.coroutines.withTimeout(60000L) {
+                    state.first { current ->
+                        current is InferenceEngine.State.Initialized ||
+                        current is InferenceEngine.State.Error
+                    }
+                }
+            }
+            val currentState = _state.value
+            if (currentState is InferenceEngine.State.Error) {
+                throw IllegalStateException(
+                    "NOVA engine initialization failed",
+                    currentState.exception
+                )
+            }
+            check(currentState is InferenceEngine.State.Initialized) {
+                "Cannot load model in ${currentState.javaClass.simpleName}!"
             }
 
             try {

@@ -135,7 +135,7 @@ async function send(){
     waiting.text='🧠 NOVA запускает локальный мозг...';
     showChat();
 
-    await brain.prepare();
+    await novaPrepareOnce();
     result=await brain.status();
 
     if(result.engine !== 'ModelReady'){
@@ -184,6 +184,29 @@ document.querySelectorAll('nav span').forEach(tab=>{
 });
 showChat();
 
+
+let novaPreparePending = null;
+
+async function novaPrepareOnce() {
+  if (novaPreparePending) return novaPreparePending;
+
+  const brain = window.Capacitor?.Plugins?.NovaBrain;
+  if (!brain) throw new Error("NovaBrain недоступен");
+
+  novaPreparePending = (async () => {
+    const status = await brain.status();
+    if (status.engine === "ModelReady")
+      return {loaded:true};
+    return await brain.prepare();
+  })();
+
+  try {
+    return await novaPreparePending;
+  } finally {
+    novaPreparePending = null;
+  }
+}
+
 async function novaAutoPrepare() {
   const brain = window.Capacitor?.Plugins?.NovaBrain;
   if (!brain) {
@@ -196,7 +219,7 @@ async function novaAutoPrepare() {
 
     if (status.engine === 'ModelReady') return;
 
-    const result = await brain.prepare();
+    const result = await novaPrepareOnce();
 
     if (result.loaded) {
       console.log('NOVA: локальная модель готова');
