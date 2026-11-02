@@ -83,6 +83,18 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+      - name: Publish Director Council test APK
+        if: github.ref == 'refs/heads/feature/nova-director-council'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Director-Lab.apk
+          gh release create "nova-director-lab-${{ github.run_number }}" release/NOVA-Director-Lab.apk \
+            --title "NOVA Director Lab #${{ github.run_number }}" \
+            --notes "Experimental offline Director Council: Gemma as director, inner voice and text Critic. Independent app, three sequential roles. Does not perform video editing yet." \
+            --prerelease --target "${{ github.sha }}"
+
       - name: Publish NOVA Release
         if: github.ref == 'refs/heads/main'
         env:
