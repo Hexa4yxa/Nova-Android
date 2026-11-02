@@ -39,6 +39,8 @@ class NovaEngine(context: Context) {
 
     fun cancelChat() = engine.requestCancel()
 
+    fun modelInfo(): String = engine.modelInfo()
+
     fun errorDetail(): String {
         val current = engine.state.value
         return if (current is InferenceEngine.State.Error) {
