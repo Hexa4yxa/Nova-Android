@@ -207,6 +207,18 @@ document.querySelectorAll('nav span').forEach(tab=>{
    note.className='small';
    note.textContent='Director, Vision, Dual Mind, Critic, Audio — подключение и проверка впереди.';
    panel.appendChild(note);
+   const diagnostics=document.createElement('p');
+   diagnostics.className='small';
+   diagnostics.textContent='🧠 Проверяю загруженную модель...';
+   panel.appendChild(diagnostics);
+   const brain=window.Capacitor?.Plugins?.NovaBrain;
+   if(brain){
+     brain.status().then(status=>{
+       diagnostics.textContent='🧠 Модель: '+(status.model||'не загружена')+
+         ' | Состояние: '+status.engine+
+         (status.detail?' | '+status.detail:'');
+     }).catch(error=>{diagnostics.textContent='Диагностика: '+error.message;});
+   }else diagnostics.textContent='Диагностика недоступна';
   }
   content.appendChild(panel);
  };
