@@ -118,6 +118,10 @@ internal class InferenceEngineImpl private constructor(
     @Volatile
     private var _cancelGeneration = false
 
+    override fun requestCancel() {
+        _cancelGeneration = true
+    }
+
     /**
      * Single-threaded coroutine dispatcher & scope for LLama asynchronous operations
      */
@@ -242,6 +246,8 @@ internal class InferenceEngineImpl private constructor(
             "User prompt discarded due to: ${_state.value.javaClass.simpleName}"
         }
 
+        _cancelGeneration = false
+
         try {
             Log.i(TAG, "Sending user prompt...")
             _readyForSystemPrompt = false
@@ -249,8 +255,7 @@ internal class InferenceEngineImpl private constructor(
 
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
-                    Log.e(TAG, "Failed to process user prompt: $result")
-                    return@flow
+                    throw IOException("Native processUserPrompt failed: $result")
                 }
             }
 
