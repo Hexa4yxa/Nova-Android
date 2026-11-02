@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">NOVA Gemma Test</string>
-    <string name="title_activity_main">NOVA Gemma Test</string>
+    <string name="app_name">NOVA Gemma Fix</string>
+    <string name="title_activity_main">NOVA Gemma Fix</string>
     <string name="package_name">ai.nova.director</string>
     <string name="custom_url_scheme">ai.nova.director</string>
 </resources>
