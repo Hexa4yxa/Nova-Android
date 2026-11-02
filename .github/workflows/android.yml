@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council]
 
 jobs:
   build:
@@ -63,9 +63,18 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build APK
+      - name: Check Director Council UI syntax and wiring
+        if: github.ref == 'refs/heads/feature/nova-director-council'
+        run: node --test tests/council-ui.test.cjs
+
+      - name: Build APK and run Kotlin unit tests
         working-directory: android
-        run: bash gradlew assembleDebug --no-daemon
+        run: |
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ]; then
+            bash gradlew testDebugUnitTest assembleDebug --no-daemon
+          else
+            bash gradlew assembleDebug --no-daemon
+          fi
 
       - name: Upload NOVA APK
         uses: actions/upload-artifact@v4
