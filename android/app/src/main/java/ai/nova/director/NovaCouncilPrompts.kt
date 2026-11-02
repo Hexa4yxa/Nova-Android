@@ -70,7 +70,7 @@ internal object NovaCouncilPrompts {
             QualityCheck("video", "Учтён вертикальный формат",
                 content.contains("9:16") || content.contains("вертикал")),
             QualityCheck("audio", "Указаны звук или атмосфера",
-                listOf("звук", "тишин", "музык", "озвуч", "шорох", "шум", "атмосфер").any(content::contains))
+                listOf("звук", "тишин", "музык", "озвуч", "шорох", "шум", "атмосфер").any { content.contains(it) })
         )
     }
 }
