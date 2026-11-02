@@ -54,6 +54,7 @@ class NovaBrainPlugin : Plugin() {
             val result = JSObject()
             result.put("bridge", "ready")
             result.put("engine", brain.state())
+            result.put("model", brain.modelInfo())
             result.put("detail", brain.errorDetail())
             result.put("generating", generating.get())
             call.resolve(result)
