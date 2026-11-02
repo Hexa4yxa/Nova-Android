@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council]
 
 jobs:
   build:
@@ -63,9 +63,18 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Build APK
+      - name: Check Director Council UI syntax and wiring
+        if: github.ref == 'refs/heads/feature/nova-director-council'
+        run: node --test tests/council-ui.test.cjs
+
+      - name: Build APK and run Kotlin unit tests
         working-directory: android
-        run: bash gradlew assembleDebug --no-daemon
+        run: |
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ]; then
+            bash gradlew testDebugUnitTest assembleDebug --no-daemon
+          else
+            bash gradlew assembleDebug --no-daemon
+          fi
 
       - name: Upload NOVA APK
         uses: actions/upload-artifact@v4
@@ -73,6 +82,18 @@ jobs:
           name: NOVA-AI-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish Director Council test APK
+        if: github.ref == 'refs/heads/feature/nova-director-council'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Director-Lab.apk
+          gh release create "nova-director-lab-${{ github.run_number }}" release/NOVA-Director-Lab.apk \
+            --title "NOVA Director Lab #${{ github.run_number }}" \
+            --notes "Experimental offline Director Council: Gemma as director, inner voice and text Critic. Independent app, three sequential roles. Does not perform video editing yet." \
+            --prerelease --target "${{ github.sha }}"
 
       - name: Publish NOVA Release
         if: github.ref == 'refs/heads/main'

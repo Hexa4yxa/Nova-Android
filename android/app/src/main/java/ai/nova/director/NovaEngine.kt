@@ -30,9 +30,13 @@ class NovaEngine(context: Context) {
     }
 
     // Stream tokens as generated instead of waiting for the whole reply.
-    suspend fun chat(message: String, onToken: (String) -> Unit): String {
+    suspend fun chat(
+        message: String,
+        maxTokens: Int = 256,
+        onToken: (String) -> Unit
+    ): String {
         val answer = StringBuilder()
-        engine.sendUserPrompt(message, 256).collect { token ->
+        engine.sendUserPrompt(message, maxTokens.coerceIn(32, 512)).collect { token ->
             answer.append(token)
             onToken(token)
         }

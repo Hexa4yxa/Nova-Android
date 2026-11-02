@@ -28,19 +28,28 @@ nav span{cursor:pointer;padding:5px}
 nav .active{color:#999bff;font-weight:bold}
 .panel{background:#20283b;border-radius:15px;padding:18px;margin-bottom:12px}
 .small{color:#a7b1cc;font-size:13px}
+.council-input{width:100%;min-height:112px;resize:vertical;border:1px solid #39435e;background:#141c2d;color:white;border-radius:12px;padding:12px;font-size:15px;line-height:1.5}
+.council-button{padding:12px 16px;font-size:14px;min-height:44px;margin:8px 7px 0 0}
+.council-stop{background:#814453}
+.council-stage{white-space:pre-wrap;overflow-wrap:anywhere;background:#141c2d;border-radius:12px;padding:12px;line-height:1.5;font-size:14px;min-height:48px}
+.council-heading{font-size:15px;font-weight:bold;margin:8px 0}
+.council-saved{display:block;width:100%;text-align:left;font-size:13px;padding:10px;margin:8px 0;background:#303b57;overflow-wrap:anywhere}
+.council-check{font-size:13px;margin:7px 0;color:#cad4e8}
+button:disabled{opacity:.45}
 </style>
 </head>
 <body>
 <div class="app">
 <header>
-<div class="brand">✦ NOVA · GEMMA FIX</div>
-<div class="subtitle">Тест Gemma · при первом запуске выбери файл модели GGUF</div>
+<div class="brand">✦ NOVA · DIRECTOR LAB</div>
+<div class="subtitle">Gemma офлайн · режиссёрский совет и Critic (тест)</div>
 </header>
 <main id="content"></main>
 <div class="bottom">
 <nav>
 <span class="active" data-tab="chat">💬 Чат</span>
-<span data-tab="projects">🎬 Проекты</span>
+<span data-tab="council">🎬 Совет</span>
+<span data-tab="projects">📁 Проекты</span>
 <span data-tab="tools">🧠 Инструменты</span>
 </nav>
 <div class="compose" id="compose">
@@ -192,6 +201,7 @@ document.querySelectorAll('nav span').forEach(tab=>{
   const selected=tab.dataset.tab;
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
+  if(selected==='council')return showCouncil();
   content.replaceChildren();
   const panel=document.createElement('div');
   panel.className='panel';
@@ -205,7 +215,7 @@ document.querySelectorAll('nav span').forEach(tab=>{
    panel.textContent='🧠 Инструменты NOVA';
    const note=document.createElement('p');
    note.className='small';
-   note.textContent='Director, Vision, Dual Mind, Critic, Audio — подключение и проверка впереди.';
+   note.textContent='Director Council и текстовый Critic: тестовый режим. Vision, монтаж и второй ИИ пока не подключены.';
    panel.appendChild(note);
    const diagnostics=document.createElement('p');
    diagnostics.className='small';
@@ -224,6 +234,176 @@ document.querySelectorAll('nav span').forEach(tab=>{
  };
 });
 showChat();
+
+
+// Offline Director Council v1: three sequential roles using the ONE loaded model.
+// All generated strings are written via textContent (no HTML from LLM).
+let councilState={
+ running:false, task:'', phase:'', plan:'', critic:'', final:'',
+ last:null, error:'', entries:[], loadedHistory:false, requestId:''
+};
+const councilLabels={
+ plan:'1/3 · NOVA — режиссёр',
+ critic:'2/3 · Внутренний голос — второй взгляд',
+ final:'3/3 · NOVA — итоговое решение'
+};
+function addCouncilElement(parent, tag, className, text){
+ const el=document.createElement(tag);
+ if(className)el.className=className;
+ if(text!==undefined)el.textContent=text;
+ parent.appendChild(el);
+ return el;
+}
+function showCouncil(){
+ content.replaceChildren();
+ const shell=addCouncilElement(content,'section','panel');
+ addCouncilElement(shell,'div','council-heading','🎬 Режиссёрский совет');
+ addCouncilElement(shell,'p','small',
+  'Тест: одна локальная Gemma играет три роли по очереди. Qwen и монтаж пока не подключены.');
+ const editor=addCouncilElement(shell,'textarea','council-input');
+ editor.id='council-task';
+ editor.maxLength=1200;
+ editor.placeholder='Например: ролик-ужас про зеркало, 35 секунд, без скримеров...';
+ editor.value=councilState.task;
+ editor.disabled=councilState.running;
+ editor.oninput=()=>{councilState.task=editor.value;};
+ const run=addCouncilElement(shell,'button','council-button','🎬 Обсудить идею');
+ run.disabled=councilState.running;
+ run.onclick=startCouncil;
+ const stop=addCouncilElement(shell,'button','council-button council-stop','■ Остановить');
+ stop.disabled=!councilState.running;
+ stop.onclick=stopCouncil;
+ const phaseLabel=councilState.running
+   ? (councilLabels[councilState.phase] || 'Подготовка модели...')
+   : (councilState.last?'Совет завершён. План сохранён на телефоне.':'Готова обсудить идею');
+ addCouncilElement(shell,'p','small',phaseLabel);
+ if(councilState.error) addCouncilElement(shell,'p','small','⚠ '+councilState.error);
+ for(const [key,label] of Object.entries(councilLabels)){
+   const panel=addCouncilElement(content,'section','panel');
+   addCouncilElement(panel,'div','council-heading',label);
+   const box=addCouncilElement(panel,'div','council-stage',councilState[key] || '—');
+   box.id='council-'+key;
+ }
+ if(councilState.last){
+   const checkPanel=addCouncilElement(content,'section','panel');
+   addCouncilElement(checkPanel,'div','council-heading','🔍 Critic: проверка текстового плана');
+   if(Array.isArray(councilState.last.checks)){
+     councilState.last.checks.forEach(check=>{
+       addCouncilElement(checkPanel,'div','council-check',
+         (check.passed?'✓ ':'○ ')+check.label);
+     });
+   }else{
+     addCouncilElement(checkPanel,'div','small',
+       'Сохранено: '+(councilState.last.checksPassed||0)+
+       ' из '+(councilState.last.checksTotal||4)+' текстовых признаков.');
+   }
+   addCouncilElement(checkPanel,'p','small',
+     'Это только анализ текста. Кадры, монтаж и синхронизация звука здесь не проверялись.');
+ }
+ const historyPanel=addCouncilElement(content,'section','panel');
+ addCouncilElement(historyPanel,'div','council-heading','📁 Сохранённые идеи');
+ const entries=Array.isArray(councilState.entries)?councilState.entries:[];
+ if(entries.length===0)addCouncilElement(historyPanel,'p','small','Здесь будут последние 8 законченных обсуждений.');
+ entries.forEach((entry,index)=>{
+   const button=addCouncilElement(historyPanel,'button','council-saved',
+     (index+1)+'. '+(entry.task||'Без названия').slice(0,110));
+   button.disabled=councilState.running;
+   button.onclick=()=>{
+     councilState.task=entry.task||'';
+     councilState.plan=entry.plan||'';
+     councilState.critic=entry.critic||'';
+     councilState.final=entry.final||'';
+     councilState.last=entry;
+     councilState.error='';
+     showCouncil();
+   };
+ });
+ if(!councilState.loadedHistory)loadCouncilHistory();
+}
+async function loadCouncilHistory(){
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ if(!brain?.councilHistory)return;
+ councilState.loadedHistory=true;
+ try{
+   const data=await brain.councilHistory();
+   councilState.entries=Array.isArray(data.entries)?data.entries:[];
+   if(document.querySelector('nav span.active')?.dataset.tab==='council')showCouncil();
+ }catch(error){
+   console.warn('История режиссёрского совета не загружена',error);
+ }
+}
+function updateCouncilStage(stage){
+ const node=document.getElementById('council-'+stage);
+ if(node)node.textContent=councilState[stage] || '—';
+}
+async function startCouncil(){
+ if(councilState.running||busy)return;
+ const task=councilState.task.trim();
+ if(!task||task.length>1200){
+  councilState.error='Напиши задачу длиной до 1200 символов.';
+  return showCouncil();
+ }
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ if(!brain?.directorCouncil){
+  councilState.error='Эта версия APK не поддерживает режиссёрский совет.';
+  return showCouncil();
+ }
+ councilState.running=true;
+ busy=true;
+ councilState.phase='';
+ councilState.plan='';
+ councilState.critic='';
+ councilState.final='';
+ councilState.last=null;
+ councilState.error='';
+ councilState.requestId='council-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+ showCouncil();
+ let subscription=null;
+ try{
+   let status=await brain.status();
+   if(status.engine!=='ModelReady'){
+     await novaPrepareOnce();
+     status=await brain.status();
+     if(status.engine!=='ModelReady')
+       throw new Error('Модель не готова: '+status.engine);
+   }
+   subscription=await brain.addListener('councilToken',event=>{
+     if(event.requestId!==councilState.requestId)return;
+     if(!Object.prototype.hasOwnProperty.call(councilLabels,event.stage))return;
+     const changed=councilState.phase!==event.stage;
+     councilState.phase=event.stage;
+     councilState[event.stage]+=event.token||'';
+     if(changed&&document.querySelector('nav span.active')?.dataset.tab==='council')showCouncil();
+     updateCouncilStage(event.stage);
+   });
+   const response=await brain.directorCouncil({
+     task,requestId:councilState.requestId
+   });
+   councilState.plan=response.plan||'';
+   councilState.critic=response.critic||'';
+   councilState.final=response.final||'';
+   councilState.last=response;
+   councilState.loadedHistory=false;
+ }catch(error){
+   councilState.error=error?.message||String(error);
+ }finally{
+   if(subscription)await subscription.remove().catch(e=>console.warn('NOVA',e));
+   councilState.running=false;
+   councilState.phase='';
+   busy=false;
+   if(document.querySelector('nav span.active')?.dataset.tab==='council')showCouncil();
+ }
+}
+async function stopCouncil(){
+ if(!councilState.running)return;
+ try{
+   const brain=window.Capacitor?.Plugins?.NovaBrain;
+   await brain.cancelChat();
+ }catch(error){
+   councilState.error='Не удалось остановить генерацию: '+(error?.message||String(error));
+   if(document.querySelector('nav span.active')?.dataset.tab==='council')showCouncil();
+ }
+}
 
 
 let novaPreparePending = null;

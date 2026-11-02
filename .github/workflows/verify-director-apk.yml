@@ -1,0 +1,27 @@
+name: Verify Director Lab APK for Android installation
+on:
+  push:
+    branches: [feature/nova-director-council]
+    paths: [.github/workflows/verify-director-apk.yml]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download nova-director-lab-33 --repo Hexa4yxa/Nova-Android --pattern 'NOVA-Director-Lab.apk'
+          ls -lh NOVA-Director-Lab.apk
+          echo "9bdf6c9bf938d40ea62ac17857013987eb2d513ddbfef12d12c446d19aedc469  NOVA-Director-Lab.apk" | sha256sum -c -
+      - name: Check APK signing and manifest compatibility
+        run: |
+          set -eu
+          TOOLS="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)"
+          echo "Android build tools: $TOOLS"
+          "$TOOLS/apksigner" verify --verbose --print-certs NOVA-Director-Lab.apk
+          "$TOOLS/aapt" dump badging NOVA-Director-Lab.apk | head -n 15
+          unzip -t NOVA-Director-Lab.apk | tail -n 2
