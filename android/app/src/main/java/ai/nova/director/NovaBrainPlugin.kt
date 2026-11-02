@@ -14,11 +14,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 @CapacitorPlugin(name = "NovaBrain")
 class NovaBrainPlugin : Plugin() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val generating = AtomicBoolean(false)
 
     private val brain: NovaEngine by lazy {
         NovaEngine(context)
@@ -40,7 +43,7 @@ class NovaBrainPlugin : Plugin() {
                 result.put("loaded", true)
                 call.resolve(result)
             } catch (e: Exception) {
-                call.reject("Ошибка запуска Qwen: " + e.toString(), e)
+                call.reject("Ошибка запуска модели: " + e.toString(), e)
             }
         }
     }
@@ -51,6 +54,9 @@ class NovaBrainPlugin : Plugin() {
             val result = JSObject()
             result.put("bridge", "ready")
             result.put("engine", brain.state())
+            result.put("model", brain.modelInfo())
+            result.put("detail", brain.errorDetail())
+            result.put("generating", generating.get())
             call.resolve(result)
         } catch (e: Exception) {
             call.reject("NOVA status failed", e)
@@ -133,17 +139,37 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Message required")
             return
         }
+        if (!generating.compareAndSet(false, true)) {
+            call.reject("NOVA is already generating a reply")
+            return
+        }
+        val requestId = call.getString("requestId") ?: UUID.randomUUID().toString()
 
         scope.launch {
             try {
-                val answer = brain.chat(message)
+                val answer = brain.chat(message) { token ->
+                    val update = JSObject()
+                    update.put("requestId", requestId)
+                    update.put("token", token)
+                    notifyListeners("token", update)
+                }
                 val result = JSObject()
                 result.put("answer", answer)
                 call.resolve(result)
             } catch (e: Exception) {
-                call.reject("NOVA chat failed", e)
+                call.reject("NOVA chat failed: " + (e.message ?: e.javaClass.simpleName), e)
+            } finally {
+                generating.set(false)
             }
         }
+    }
+
+    @PluginMethod
+    fun cancelChat(call: PluginCall) {
+        brain.cancelChat()
+        val result = JSObject()
+        result.put("cancelRequested", true)
+        call.resolve(result)
     }
 
     override fun handleOnDestroy() {

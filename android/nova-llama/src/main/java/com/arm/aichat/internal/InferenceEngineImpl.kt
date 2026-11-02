@@ -93,6 +93,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun systemInfo(): String
 
     @FastNative
+    private external fun nativeModelInfo(): String
+
+    @FastNative
     private external fun benchModel(pp: Int, tg: Int, pl: Int, nr: Int): String
 
     @FastNative
@@ -117,6 +120,18 @@ internal class InferenceEngineImpl private constructor(
     private var _readyForSystemPrompt = false
     @Volatile
     private var _cancelGeneration = false
+
+    override fun requestCancel() {
+        _cancelGeneration = true
+    }
+
+    override fun modelInfo(): String = when (_state.value) {
+        is InferenceEngine.State.ModelReady,
+        is InferenceEngine.State.ProcessingSystemPrompt,
+        is InferenceEngine.State.ProcessingUserPrompt,
+        is InferenceEngine.State.Generating -> nativeModelInfo()
+        else -> ""
+    }
 
     /**
      * Single-threaded coroutine dispatcher & scope for LLama asynchronous operations
@@ -242,6 +257,8 @@ internal class InferenceEngineImpl private constructor(
             "User prompt discarded due to: ${_state.value.javaClass.simpleName}"
         }
 
+        _cancelGeneration = false
+
         try {
             Log.i(TAG, "Sending user prompt...")
             _readyForSystemPrompt = false
@@ -249,8 +266,7 @@ internal class InferenceEngineImpl private constructor(
 
             processUserPrompt(message, predictLength).let { result ->
                 if (result != 0) {
-                    Log.e(TAG, "Failed to process user prompt: $result")
-                    return@flow
+                    throw IOException("Native processUserPrompt failed: $result")
                 }
             }
 

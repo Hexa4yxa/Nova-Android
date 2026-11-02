@@ -30,6 +30,12 @@ interface InferenceEngine {
      */
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>
 
+    /** Request cancellation of ongoing generation. */
+    fun requestCancel()
+
+    /** Human-readable GGUF model identification for diagnostics. */
+    fun modelInfo(): String
+
     /**
      * Runs a benchmark with the specified parameters.
      */

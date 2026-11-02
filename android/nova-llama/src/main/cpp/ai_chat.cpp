@@ -140,6 +140,19 @@ static std::string get_backend() {
 
 extern "C"
 JNIEXPORT jstring JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_nativeModelInfo(JNIEnv *env, jobject /*unused*/) {
+    if (!g_model) return env->NewStringUTF("");
+    char desc[256] = {};
+    char arch[128] = {};
+    llama_model_desc(g_model, desc, sizeof(desc));
+    llama_model_meta_val_str(g_model, "general.architecture", arch, sizeof(arch));
+    std::string result(desc);
+    if (arch[0] != '\0') result += " (" + std::string(arch) + ")";
+    return env->NewStringUTF(result.c_str());
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_systemInfo(JNIEnv *env, jobject /*unused*/) {
     return env->NewStringUTF(llama_print_system_info());
 }
@@ -318,6 +331,25 @@ static void reset_short_term_states() {
     assistant_ss.clear();
 }
 
+// The chat template supplies BOS/EOS markers; do not inject them again
+// at every incremental prompt turn.
+static llama_tokens tokenize_chat_fragment(const std::string &formatted, bool first) {
+    const auto *vocab = llama_model_get_vocab(g_model);
+    auto tokens = common_tokenize(g_context, formatted, /* add_special */ false,
+                                  /* parse_special */ true);
+    const llama_token bos = llama_vocab_bos(vocab);
+    if (bos != LLAMA_TOKEN_NULL && first && llama_vocab_get_add_bos(vocab)) {
+        if (tokens.empty() || tokens.front() != bos) {
+            tokens.insert(tokens.begin(), bos);
+        }
+    } else if (bos != LLAMA_TOKEN_NULL && !first &&
+               !tokens.empty() && tokens.front() == bos) {
+        LOGw("Unexpected BOS at user turn; dropping duplicate");
+        tokens.erase(tokens.begin());
+    }
+    return tokens;
+}
+
 static int decode_tokens_in_batches(
         llama_context *context,
         common_batch &batch,
@@ -379,8 +411,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
     env->ReleaseStringUTFChars(jsystem_prompt, system_prompt);
 
     // Tokenize system prompt
-    const auto system_tokens = common_tokenize(g_context, formatted_system_prompt,
-                                               has_chat_template, has_chat_template);
+    const auto system_tokens = tokenize_chat_fragment(formatted_system_prompt, /* first */ true);
     for (auto id: system_tokens) {
         LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);
     }
@@ -430,7 +461,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     common_sampler_reset(g_sampler);
 
     // Decode formatted user prompts
-    auto user_tokens = common_tokenize(g_context, formatted_user_prompt, has_chat_template, has_chat_template);
+    auto user_tokens = tokenize_chat_fragment(formatted_user_prompt, /* first */ false);
     for (auto id: user_tokens) {
         LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);
     }
@@ -439,9 +470,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     const int user_prompt_size = (int) user_tokens.size();
     const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
     if (user_prompt_size > max_batch_size) {
-        const int skipped_tokens = user_prompt_size - max_batch_size;
-        user_tokens.resize(max_batch_size);
-        LOGw("%s: User prompt too long! Skipped %d tokens!", __func__, skipped_tokens);
+        LOGe("%s: User prompt too long (%d tokens, max %d)", __func__, user_prompt_size, max_batch_size);
+        return 3;
     }
 
     // Decode user tokens in batches

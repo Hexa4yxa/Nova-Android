@@ -45,6 +45,7 @@ nav .active{color:#999bff;font-weight:bold}
 </nav>
 <div class="compose" id="compose">
 <input id="message" placeholder="Напиши задачу NOVA...">
+<button id="stop" aria-label="Остановить ответ" style="display:none">■</button>
 <button id="send" aria-label="Отправить">➤</button>
 </div>
 </div>
@@ -139,12 +140,40 @@ async function send(){
     result=await brain.status();
 
     if(result.engine !== 'ModelReady'){
-      throw new Error('Модель не готова: '+result.engine);
+      throw new Error('Модель не готова: '+result.engine+(result.detail?' — '+result.detail:''));
     }
   }
 
-  const answer=await brain.chat({message:text});
-  waiting.text=answer.answer || 'NOVA вернула пустой ответ.';
+  const requestId='nova-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+  let streamed='';
+  let stopped=false;
+  const stopButton=document.getElementById('stop');
+  const subscription=await brain.addListener('token',event=>{
+    if(event.requestId!==requestId)return;
+    streamed+=event.token || '';
+    waiting.text=streamed || '🎬 NOVA думает...';
+    if(document.querySelector('nav span.active')?.dataset.tab==='chat'){
+      const nodes=content.querySelectorAll('.message.nova');
+      if(nodes.length)nodes[nodes.length-1].textContent=waiting.text;
+      content.scrollTop=content.scrollHeight;
+    }
+  });
+  stopButton.style.display='inline-block';
+  stopButton.disabled=false;
+  stopButton.onclick=async()=>{
+    stopped=true;
+    stopButton.disabled=true;
+    try{await brain.cancelChat();}
+    catch(error){console.warn('NOVA: отмена не удалась',error);}
+  };
+  try{
+    const answer=await brain.chat({message:text,requestId});
+    waiting.text=answer.answer || streamed || (stopped?'Ответ остановлен.':'NOVA вернула пустой ответ.');
+  }finally{
+    stopButton.style.display='none';
+    stopButton.onclick=null;
+    await subscription.remove();
+  }
  }catch(error){
   waiting.text='❌ Ошибка NOVA: '+error.message;
  }finally{
@@ -178,6 +207,18 @@ document.querySelectorAll('nav span').forEach(tab=>{
    note.className='small';
    note.textContent='Director, Vision, Dual Mind, Critic, Audio — подключение и проверка впереди.';
    panel.appendChild(note);
+   const diagnostics=document.createElement('p');
+   diagnostics.className='small';
+   diagnostics.textContent='🧠 Проверяю загруженную модель...';
+   panel.appendChild(diagnostics);
+   const brain=window.Capacitor?.Plugins?.NovaBrain;
+   if(brain){
+     brain.status().then(status=>{
+       diagnostics.textContent='🧠 Модель: '+(status.model||'не загружена')+
+         ' | Состояние: '+status.engine+
+         (status.detail?' | '+status.detail:'');
+     }).catch(error=>{diagnostics.textContent='Диагностика: '+error.message;});
+   }else diagnostics.textContent='Диагностика недоступна';
   }
   content.appendChild(panel);
  };
