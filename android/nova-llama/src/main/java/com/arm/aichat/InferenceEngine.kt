@@ -33,6 +33,9 @@ interface InferenceEngine {
     /** Request cancellation of ongoing generation. */
     fun requestCancel()
 
+    /** Human-readable GGUF model identification for diagnostics. */
+    fun modelInfo(): String
+
     /**
      * Runs a benchmark with the specified parameters.
      */
