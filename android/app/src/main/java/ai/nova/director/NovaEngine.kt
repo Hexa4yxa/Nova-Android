@@ -3,7 +3,7 @@ package ai.nova.director
 import android.content.Context
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.collect
 
 class NovaEngine(context: Context) {
     private val engine: InferenceEngine =
@@ -27,10 +27,23 @@ class NovaEngine(context: Context) {
         engine.setSystemPrompt(prompt)
     }
 
-    suspend fun chat(message: String): String {
-        return engine.sendUserPrompt(message, 256)
-            .toList()
-            .joinToString("")
+    // Stream tokens as generated instead of waiting for the whole reply.
+    suspend fun chat(message: String, onToken: (String) -> Unit): String {
+        val answer = StringBuilder()
+        engine.sendUserPrompt(message, 256).collect { token ->
+            answer.append(token)
+            onToken(token)
+        }
+        return answer.toString()
+    }
+
+    fun cancelChat() = engine.requestCancel()
+
+    fun errorDetail(): String {
+        val current = engine.state.value
+        return if (current is InferenceEngine.State.Error) {
+            current.exception.message ?: current.exception.javaClass.simpleName
+        } else ""
     }
 
     fun state(): String =
