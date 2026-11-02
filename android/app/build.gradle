@@ -28,8 +28,11 @@ android {
             // Use a separate package for experimental builds to protect the
             // user's installed NOVA and its imported offline model.
             def isolatedBuild = System.getenv('GITHUB_REF') == 'refs/heads/fix/nova-streaming-android'
-            applicationIdSuffix isolatedBuild ? ".testfix" : ".test"
-            versionNameSuffix isolatedBuild ? "-testfix" : "-test"
+            // This test uses a fresh app-data directory, so the Qwen
+            // installation and its saved GGUF remain untouched.
+            def gemmaTest = System.getenv('GITHUB_REF') == 'refs/heads/experiment/nova-gemma'
+            applicationIdSuffix gemmaTest ? ".gemmatest" : (isolatedBuild ? ".testfix" : ".test")
+            versionNameSuffix gemmaTest ? "-gemmatest" : (isolatedBuild ? "-testfix" : "-test")
         }
         release {
             minifyEnabled false
