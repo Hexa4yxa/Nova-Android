@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma]
 
 jobs:
   build:
