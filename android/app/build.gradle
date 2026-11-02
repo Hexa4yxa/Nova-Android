@@ -24,8 +24,12 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix ".test"
-            versionNameSuffix "-test"
+            // CI debug signing keys can change between GitHub-hosted runners.
+            // Use a separate package for experimental builds to protect the
+            // user's installed NOVA and its imported offline model.
+            def isolatedBuild = System.getenv('GITHUB_REF') == 'refs/heads/fix/nova-streaming-android'
+            applicationIdSuffix isolatedBuild ? ".testfix" : ".test"
+            versionNameSuffix isolatedBuild ? "-testfix" : "-test"
         }
         release {
             minifyEnabled false
