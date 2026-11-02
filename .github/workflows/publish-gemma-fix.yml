@@ -1,0 +1,31 @@
+name: Publish Gemma Fix APK download
+on:
+  push:
+    branches: [experiment/nova-gemma]
+    paths:
+      - .github/workflows/publish-gemma-fix.yml
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download validated build 30
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 41400220351 --repo Hexa4yxa/Nova-Android --name NOVA-AI-APK --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/NOVA-Gemma-Fix-30.apk
+          sha256sum release/NOVA-Gemma-Fix-30.apk
+      - name: Publish direct APK link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "nova-gemma-fix-30" "release/NOVA-Gemma-Fix-30.apk" \
+            --repo Hexa4yxa/Nova-Android \
+            --title "NOVA Gemma Fix #30 (Android APK)" \
+            --notes "Test build #30. Offline Gemma mode with thinking disabled. Installs separately from existing NOVA." \
+            --prerelease \
+            --target "${{ github.sha }}"
