@@ -307,8 +307,32 @@ static std::string chat_add_and_format(const std::string &role, const std::strin
     common_chat_msg new_msg;
     new_msg.role = role;
     new_msg.content = content;
-    auto formatted = common_chat_format_single(
-            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ true);
+    // common_chat_format_single() uses enable_thinking=true by default.
+    // Gemma 4 then spends the reply budget on visible internal reasoning.
+    // Build the identical incremental chat-template diff with thinking OFF.
+    common_chat_templates_inputs inputs;
+    inputs.use_jinja = true;
+    inputs.enable_thinking = false;
+    // We handle BOS once at the start when tokenizing chat fragments.
+    inputs.add_bos = false;
+    inputs.add_eos = false;
+    inputs.messages = chat_msgs;
+    inputs.add_generation_prompt = false;
+    const std::string old_prompt = chat_msgs.empty() ? std::string() :
+            common_chat_templates_apply(g_chat_templates.get(), inputs).prompt.str();
+
+    inputs.messages.push_back(new_msg);
+    inputs.add_generation_prompt = (role == ROLE_USER);
+    const std::string new_prompt =
+            common_chat_templates_apply(g_chat_templates.get(), inputs).prompt.str();
+    if (new_prompt.compare(0, old_prompt.size(), old_prompt) != 0) {
+        throw std::runtime_error("Chat template output is not a prefix of the new turn");
+    }
+    std::string formatted;
+    if (role == ROLE_USER && !old_prompt.empty() && old_prompt.back() == '\n') {
+        formatted += "\n";
+    }
+    formatted += new_prompt.substr(old_prompt.size());
     chat_msgs.push_back(new_msg);
     LOGi("%s: Formatted and added %s message: \n%s\n", __func__, role.c_str(), formatted.c_str());
     return formatted;
