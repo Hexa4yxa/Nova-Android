@@ -93,6 +93,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun systemInfo(): String
 
     @FastNative
+    private external fun nativeModelInfo(): String
+
+    @FastNative
     private external fun benchModel(pp: Int, tg: Int, pl: Int, nr: Int): String
 
     @FastNative
@@ -120,6 +123,14 @@ internal class InferenceEngineImpl private constructor(
 
     override fun requestCancel() {
         _cancelGeneration = true
+    }
+
+    override fun modelInfo(): String = when (_state.value) {
+        is InferenceEngine.State.ModelReady,
+        is InferenceEngine.State.ProcessingSystemPrompt,
+        is InferenceEngine.State.ProcessingUserPrompt,
+        is InferenceEngine.State.Generating -> nativeModelInfo()
+        else -> ""
     }
 
     /**
