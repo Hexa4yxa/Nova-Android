@@ -31,8 +31,8 @@ android {
             // This test uses a fresh app-data directory, so the Qwen
             // installation and its saved GGUF remain untouched.
             def gemmaTest = System.getenv('GITHUB_REF') == 'refs/heads/experiment/nova-gemma'
-            applicationIdSuffix gemmaTest ? ".gemmatest" : (isolatedBuild ? ".testfix" : ".test")
-            versionNameSuffix gemmaTest ? "-gemmatest" : (isolatedBuild ? "-testfix" : "-test")
+            applicationIdSuffix gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")
+            versionNameSuffix gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")
         }
         release {
             minifyEnabled false
