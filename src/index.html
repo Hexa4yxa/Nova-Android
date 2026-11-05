@@ -77,6 +77,7 @@ button:disabled{opacity:.45}
 </div>
 </div>
 </div>
+<script src="nova_tool_registry.js"></script>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
@@ -233,6 +234,29 @@ async function handleImageMessage(text,requestedPrompt){
  }
 }
 
+async function handleCapabilityMessage(text,route){
+ busy=true;
+ const button=document.getElementById('send');
+ button.disabled=true;
+ history.push({who:'user',text});
+ input.value='';
+ const waiting={who:'nova',text:'🧠 Проверяю инструменты NOVA...'};
+ history.push(waiting);
+ showChat();
+ try{
+  const registry=window.NovaToolRegistry;
+  if(!registry)throw new Error('Каталог возможностей NOVA недоступен');
+  waiting.text=await registry.describeCapability(route,window.Capacitor?.Plugins||{});
+ }catch(error){
+  waiting.text='⚠ Не удалось проверить инструмент: '+(error?.message||String(error));
+ }finally{
+  busy=false;
+  button.disabled=false;
+  saveHistory();
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+ }
+}
+
 async function send(){
  const text=input.value.trim();
  if(!text || busy)return;
@@ -246,6 +270,13 @@ async function send(){
    input.value='';saveHistory();showChat();return;
   }
   await handleImageMessage(text,imagePrompt===null?text:imagePrompt);
+  return;
+ }
+
+ // NOVA, not Gemma, knows which native tools are installed and operational.
+ const capability=window.NovaToolRegistry?.classifyCapability(text,history);
+ if(capability){
+  await handleCapabilityMessage(text,capability);
   return;
  }
 
