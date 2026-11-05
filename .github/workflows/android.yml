@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads]
 
 jobs:
   build:
@@ -64,13 +64,15 @@ jobs:
         run: npx cap sync android
 
       - name: Check Director Council UI syntax and wiring
-        if: github.ref == 'refs/heads/feature/nova-director-council'
-        run: node --test tests/council-ui.test.cjs
+        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads'
+        run: |
+          node --test tests/council-ui.test.cjs
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ]; then node --test tests/nova-tools-ui.test.cjs; fi
 
       - name: Build APK and run Kotlin unit tests
         working-directory: android
         run: |
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ]; then
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ]; then
             bash gradlew testDebugUnitTest assembleDebug --no-daemon
           else
             bash gradlew assembleDebug --no-daemon
