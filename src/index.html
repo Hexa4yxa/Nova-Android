@@ -384,6 +384,7 @@ function renderNovaImageStudio(initialPrompt=''){
  }
 
  const controls=node(panel,'div','tool-actions');
+ const openLocal=node(controls,'button','','📱 Открыть Local Dream');
  const check=node(controls,'button','','🔎 Проверить');
  const generate=node(controls,'button','','🎨 Создать 512×512');
  const stop=node(controls,'button','','■ Остановить');
@@ -397,9 +398,17 @@ function renderNovaImageStudio(initialPrompt=''){
  content.appendChild(panel);
  if(!plugin){
    status.textContent='Для генерации нужна тестовая NOVA с модулем NovaImage.';
-   check.disabled=true;generate.disabled=true;stop.disabled=true;
+   openLocal.disabled=true;check.disabled=true;generate.disabled=true;stop.disabled=true;
    return;
  }
+ openLocal.onclick=async()=>{
+   openLocal.disabled=true;
+   try{
+     await plugin.openLocalDream();
+     status.textContent='Local Dream открыт. Выбери модель и запусти её, затем вернись в NOVA и нажми «Проверить».';
+   }catch(e){status.textContent='⚠ '+(e?.message||String(e));}
+   finally{openLocal.disabled=false;}
+ };
  check.onclick=async()=>{
    check.disabled=true;
    status.textContent='Проверяю Local Dream...';
