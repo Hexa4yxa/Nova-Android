@@ -483,8 +483,9 @@ async function showBrainManager(){
     add(row,'div','brain-caption',detail);
     if(state==='paused'){
      add(row,'div','brain-caption','🔎 '+(installed.pauseExplanation||
-      'Android остановил скачивание. Проверь доступ к Wi-Fi. NOVA не использует мобильные данные для загрузки модели.'));
-     add(row,'div','brain-caption','Не нажимай «Отменить»: при появлении разрешённой сети Android обычно продолжит загрузку автоматически.');
+      'Android остановил скачивание. Проверь доступ к Wi-Fi и разрешения для раздачи.'));
+     if(!installed.hotspotDetected&&!installed.allowMeteredWifi)
+      add(row,'div','brain-caption','При появлении подходящей безлимитной сети загрузка обычно продолжится автоматически. Не нужно удалять NOVA.');
     }
     if(['pending','downloading','paused'].includes(state)){
      const p=add(row,'progress','nova-download-progress');
@@ -494,12 +495,27 @@ async function showBrainManager(){
     }
     if(state==='failed'&&installed.error)add(row,'div','brain-caption','⚠ '+installed.error);
     if(state==='available'||state==='failed'||state==='not_found'){
-     const startDownload=add(row,'button','','⬇️ Скачать 2,13 ГБ');
+     const hotspot=!!(installed.hotspotDetected&&installed.wifiConnected);
+     const startDownload=add(row,'button','',hotspot?'📶 Скачать через раздачу Wi-Fi':'⬇️ Скачать 2,13 ГБ');
+     if(hotspot)add(row,'div','brain-caption','Раздача другого телефона может расходовать его мобильный тариф. Перед загрузкой Android попросит подтверждение.');
      startDownload.onclick=async()=>{
-      // Final permission is requested by the native Android dialog, not a duplicate browser popup.
+      // Native dialog contains the final explicit approval.
       startDownload.disabled=true;
-      try{await downloads.downloadRecommended({approved:true});await refreshImages();}
+      try{await downloads.downloadRecommended({approved:true,allowMeteredWifi:hotspot});await refreshImages();}
       catch(e){imageState.textContent='⚠ '+(e?.message||String(e));startDownload.disabled=false;}
+     };
+    }
+    // When another phone shares its mobile internet, Android often marks
+    // the Wi-Fi as metered. The previous DownloadManager job must be
+    // explicitly restarted with new constraints after owner approval.
+    if(state==='paused'&&installed.hotspotDetected&&installed.wifiConnected&&!installed.allowMeteredWifi){
+     add(row,'div','brain-caption','📶 Обнаружена раздача (лимитный Wi-Fi). Старая загрузка заблокирована ограничением. Можно разрешить трафик раздающего телефона и перезапустить её.');
+     const permitHotspot=add(row,'button','','📶 Разрешить загрузку через раздачу');
+     permitHotspot.onclick=async()=>{
+      permitHotspot.disabled=true;
+      imageState.textContent='Откроется системное подтверждение использования раздачи Wi-Fi.';
+      try{await downloads.downloadRecommended({approved:true,allowMeteredWifi:true});await refreshImages();}
+      catch(e){imageState.textContent='⚠ '+(e?.message||String(e));permitHotspot.disabled=false;}
      };
     }
     if(['pending','downloading','paused'].includes(state)){
