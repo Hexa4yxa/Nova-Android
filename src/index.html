@@ -173,7 +173,7 @@ function imageEnhancedPrompt(raw){
  const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац)/iu.test(raw);
  const detailed=/(?:photorealistic|realistic photography|cinematic lighting|detailed photo|35mm film|high detail)/iu.test(raw);
  if(anime||detailed)return raw.trim();
- return raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures';
+ return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
 }
 async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
@@ -198,7 +198,7 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
      if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
     }
    }catch(e){console.warn('NOVA prompt planner: original description used',e);}
-   visualPrompt=imageEnhancedPrompt(visualPrompt);
+   visualPrompt=imageEnhancedPrompt(visualPrompt).slice(0,590);
    onProgress('🧠 Освобождаю память для рисования...');
    await brain.releaseForImage();
    imageReserved=true;
@@ -732,11 +732,11 @@ function renderNovaImageStudio(initialPrompt=''){
   const option=node(sizeSelect,'option','',label);
   option.value=size;
  }
- sizeSelect.value='256';
+ sizeSelect.value='512';
  const controls=node(panel,'div','tool-actions');
  const openDream=node(controls,'button','','📂 Добавить модель в NOVA');
  const check=node(controls,'button','','🔎 Проверить');
- const generate=node(controls,'button','','🎨 Создать 256×256');
+ const generate=node(controls,'button','','🎨 Создать 512×512');
  sizeSelect.onchange=()=>{generate.textContent='🎨 Создать '+sizeSelect.value+'×'+sizeSelect.value;};
  const stop=node(controls,'button','','■ Остановить');
  stop.disabled=!imageBusy;
