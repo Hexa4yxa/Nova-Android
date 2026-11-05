@@ -90,7 +90,7 @@ jobs:
       - name: Build APK and run Kotlin unit tests
         working-directory: android
         run: |
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ]; then
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then
             bash gradlew testDebugUnitTest assembleDebug --no-daemon
           else
             bash gradlew assembleDebug --no-daemon
@@ -108,6 +108,19 @@ jobs:
           name: NOVA-AI-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish isolated NOVA Native Image test APK
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Native-Image-Test.apk
+          sha256sum release/NOVA-Native-Image-Test.apk | tee release/SHA256SUMS.txt
+          gh release create "nova-native-image-test-${{ github.run_number }}" release/NOVA-Native-Image-Test.apk release/SHA256SUMS.txt \
+            --title "NOVA Native Image Test #${{ github.run_number }}" \
+            --notes "Separate Android test package (.nativeimage), does not replace installed NOVA. Built-in stable-diffusion.cpp and owner-approved SD1.5 model installation. Kotlin unit tests + JS tests run in CI; on-device image generation, temperatures and Gemma restoration NOT YET verified. Download image weights only with user consent." \
+            --prerelease --target "${{ github.sha }}"
 
       - name: Publish isolated NOVA Brains Lab APK
         if: github.ref == 'refs/heads/feature/nova-brains-auto'
