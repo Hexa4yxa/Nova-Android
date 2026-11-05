@@ -86,6 +86,7 @@ jobs:
           if [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-image-ui.test.cjs; fi
           if [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-brains-ui.test.cjs; fi
           if [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-native-image.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-tool-registry.test.cjs; fi
 
       - name: Build APK and run Kotlin unit tests
         working-directory: android
