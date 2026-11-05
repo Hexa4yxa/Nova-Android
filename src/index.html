@@ -26,9 +26,12 @@ button{border:0;background:#6d70f5;color:white;border-radius:16px;padding:0 18px
 nav{display:flex;justify-content:space-around;padding:14px 0 6px;color:#b8c1dc;font-size:13px}
 nav span{cursor:pointer;padding:5px 1px;white-space:nowrap}
 nav{font-size:11px;gap:4px}
-.brain-row{padding:12px;margin:8px 0;border-radius:11px;background:#141c2d}
-.brain-row button{margin-top:7px;padding:9px 12px;font-size:13px}
-.brain-caption{font-size:12px;color:#a7b1cc;overflow-wrap:anywhere}
+.brain-row{padding:14px;margin:10px 0;border:1px solid #344059;border-radius:14px;background:#141c2d;line-height:1.5}
+.brain-row button{margin-top:10px;padding:10px 14px;font-size:13px;min-height:42px}
+.brain-caption{font-size:12px;color:#b6c1d6;overflow-wrap:anywhere;margin-top:5px}
+.nova-download-progress{display:block;width:100%;height:9px;margin:10px 0 3px;accent-color:#888bff}
+button:focus-visible,nav span:focus-visible{outline:2px solid #b4b7ff;outline-offset:3px}
+@media(max-width:360px){.brand{font-size:19px;letter-spacing:1px}.panel{padding:14px}nav{font-size:10px}}
 nav .active{color:#999bff;font-weight:bold}
 .panel{background:#20283b;border-radius:15px;padding:18px;margin-bottom:12px}
 .small{color:#a7b1cc;font-size:13px}
@@ -454,6 +457,12 @@ async function showBrainManager(){
       pct+'% ('+(received/1048576).toFixed(0)+' / '+(total/1048576).toFixed(0)+' МБ).';
     }else detail='С официального каталога Comfy-Org (Hugging Face). CreativeML OpenRAIL-M. Только Wi-Fi, после установки — офлайн.';
     add(row,'div','brain-caption',detail);
+    if(['pending','downloading','paused'].includes(state)){
+     const p=add(row,'progress','nova-download-progress');
+     p.max=100;
+     p.value=total>0?Math.max(0,Math.min(100,Math.floor(received/total*100))):0;
+     p.setAttribute('aria-label','Скачивание модели: '+p.value+'%');
+    }
     if(state==='failed'&&installed.error)add(row,'div','brain-caption','⚠ '+installed.error);
     if(state==='available'||state==='failed'||state==='not_found'){
      const startDownload=add(row,'button','','⬇️ Скачать 2,13 ГБ');
