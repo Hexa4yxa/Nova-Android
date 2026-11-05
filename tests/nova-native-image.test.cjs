@@ -18,6 +18,9 @@ test('NOVA single-app UI is syntactically valid and has no required external ima
  assert.match(js,/downloads\.downloadRecommended\(\{approved:true\}\)/);
  assert.match(js,/brain\.releaseForImage\(\)/);
  assert.match(js,/bridge\.generate\(/);
+ assert.match(js,/\uD83E\uDDEA Проверить PNG/);
+ assert.match(js,/executeImageGeneration\(prompt,message=>/);
+ assert.match(js,/imageTestPreview\.replaceChildren\(\)/);
  assert.doesNotMatch(js,/image\.openLocalDream\(/);
  assert.doesNotMatch(js,/innerHTML\s*=/);
 });
