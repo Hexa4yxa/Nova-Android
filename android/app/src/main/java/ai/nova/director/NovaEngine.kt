@@ -43,6 +43,9 @@ class NovaEngine(context: Context) {
         return answer.toString()
     }
 
+    /** Release current GGUF before sequentially activating another model. */
+    fun unloadModel() = engine.cleanUp()
+
     fun cancelChat() = engine.requestCancel()
 
     fun modelInfo(): String = engine.modelInfo()

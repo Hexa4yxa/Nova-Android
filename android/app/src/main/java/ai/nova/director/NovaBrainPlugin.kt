@@ -3,6 +3,9 @@ import androidx.activity.result.ActivityResult
 import com.getcapacitor.annotation.ActivityCallback
 import android.app.Activity
 import android.content.Intent
+import android.provider.OpenableColumns
+import java.io.File
+import java.io.FileInputStream
 
 import com.getcapacitor.JSObject
 import com.getcapacitor.JSArray
@@ -26,6 +29,8 @@ class NovaBrainPlugin : Plugin() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val generating = AtomicBoolean(false)
+    private val modelLoading = AtomicBoolean(false)
+    @Volatile private var activeModelId: String = ""
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var councilPhase = ""
 
@@ -33,23 +38,245 @@ class NovaBrainPlugin : Plugin() {
         NovaEngine(context)
     }
 
+
+    // NOVA Brain Manager: each GGUF is copied once, then loaded locally on demand.
+    // Other installed Android apps' private data cannot be accessed here.
+    private val modelPrefs get() =
+        context.getSharedPreferences("nova_brain_manager", 0)
+
+    private fun modelDirectory(): File {
+        val dir = File(context.filesDir, "nova_brains")
+        check(dir.isDirectory || dir.mkdirs()) { "Не удалось создать папку моделей" }
+        return dir
+    }
+
+    private fun resolveModel(id: String): File? {
+        if (id == "legacy") {
+            val file = File(context.filesDir, "nova-model.gguf")
+            return file.takeIf { it.isFile }
+        }
+        if (!Regex("^[0-9a-f-]{36}$").matches(id)) return null
+        return File(modelDirectory(), id + ".gguf").takeIf { it.isFile }
+    }
+
+    private fun selectedModelId(): String? {
+        val id = modelPrefs.getString("selected_id", null)
+        if (id != null && resolveModel(id) != null) return id
+        if (resolveModel("legacy") != null) return "legacy"
+        return modelDirectory().listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".gguf") }
+            ?.map { it.name.removeSuffix(".gguf") }
+            ?.filter { resolveModel(it) != null }
+            ?.sorted()
+            ?.firstOrNull()
+    }
+
+    private fun checkGguf(file: File) {
+        require(file.length() in 100_000L..8_000_000_000L) {
+            "Некорректный размер GGUF или недостаточно места"
+        }
+        val magic = ByteArray(4)
+        FileInputStream(file).use { input ->
+            require(input.read(magic) == 4) { "Пустой файл модели" }
+        }
+        require(String(magic, Charsets.US_ASCII) == "GGUF") {
+            "Выбранный файл не является GGUF"
+        }
+    }
+
+    private suspend fun activateModel(id: String) {
+        val file = resolveModel(id) ?: error("Модель не найдена в памяти NOVA")
+        checkGguf(file)
+        if (brain.state() == "ModelReady" && activeModelId == id) return
+        val previousId = activeModelId.takeIf { it.isNotEmpty() }
+        val oldReady = brain.state() == "ModelReady"
+        try {
+            when (brain.state()) {
+                "ModelReady", "Error" -> brain.unloadModel()
+                "Initialized" -> Unit
+                else -> error("Движок пока занят: " + brain.state())
+            }
+            brain.loadModel(file.absolutePath)
+            activeModelId = id
+            modelPrefs.edit().putString("selected_id", id).apply()
+        } catch (failure: Exception) {
+            activeModelId = ""
+            if (oldReady && previousId != null && previousId != id) {
+                try {
+                    if (brain.state() == "Error") brain.unloadModel()
+                    val oldFile = resolveModel(previousId)
+                    if (oldFile != null) {
+                        brain.loadModel(oldFile.absolutePath)
+                        activeModelId = previousId
+                        modelPrefs.edit().putString("selected_id", previousId).apply()
+                    }
+                } catch (_: Exception) { /* original error is reported */ }
+            }
+            throw failure
+        }
+    }
+
+    @PluginMethod
+    fun listModels(call: PluginCall) {
+        try {
+            val selected = selectedModelId()
+            val models = JSArray()
+            val files = ArrayList<Pair<String, File>>()
+            resolveModel("legacy")?.let { files.add("legacy" to it) }
+            modelDirectory().listFiles()
+                ?.filter { it.isFile && it.name.endsWith(".gguf") }
+                ?.sortedBy { it.name }
+                ?.forEach { file ->
+                    val id = file.name.removeSuffix(".gguf")
+                    if (resolveModel(id) != null) files.add(id to file)
+                }
+            files.forEach { (id, file) ->
+                models.put(JSObject().apply {
+                    put("id", id)
+                    put("name", if (id == "legacy") "Основная сохранённая GGUF"
+                        else modelPrefs.getString("name_" + id, file.name))
+                    put("bytes", file.length())
+                    put("selected", id == selected)
+                    put("active", activeModelId == id && brain.state() == "ModelReady")
+                })
+            }
+            call.resolve(JSObject().apply {
+                put("models", models)
+                put("selectedId", selected ?: "")
+                put("ready", brain.state() == "ModelReady")
+                put("engine", brain.state())
+                put("loading", modelLoading.get())
+                put("activeId", activeModelId)
+            })
+        } catch (e: Exception) {
+            call.reject("Не удалось получить список моделей: " + e.message, e)
+        }
+    }
+
+    @PluginMethod
+    fun activateSavedModel(call: PluginCall) {
+        val id = call.getString("id").orEmpty()
+        if (resolveModel(id) == null) {
+            call.reject("Эта GGUF пока не импортирована в NOVA")
+            return
+        }
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            call.reject("Сначала заверши текущую задачу NOVA")
+            return
+        }
+        scope.launch {
+            try {
+                activateModel(id)
+                call.resolve(JSObject().apply {
+                    put("ready", true)
+                    put("activeId", id)
+                    put("model", brain.modelInfo())
+                })
+            } catch (e: Exception) {
+                call.reject("Не удалось подключить модель: " + e.message, e)
+            } finally {
+                modelLoading.set(false)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun importAdditionalModel(call: PluginCall) {
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            call.reject("Сначала заверши текущую задачу")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(call, intent, "additionalModelSelected")
+        } catch (e: Exception) {
+            modelLoading.set(false)
+            call.reject("Не удалось открыть выбор файла: " + e.message, e)
+        }
+    }
+
+    @ActivityCallback
+    private fun additionalModelSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            modelLoading.set(false)
+            call.reject("Выбор модели отменён")
+            return
+        }
+        scope.launch {
+            var newFile: File? = null
+            var temp: File? = null
+            try {
+                val filename = context.contentResolver.query(
+                    uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: "imported.gguf"
+                require(filename.lowercase().endsWith(".gguf")) {
+                    "Выбери файл модели с расширением .gguf"
+                }
+                val id = UUID.randomUUID().toString()
+                temp = File(modelDirectory(), id + ".partial")
+                val destination = File(modelDirectory(), id + ".gguf")
+                context.contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Нельзя открыть модель" }
+                    temp!!.outputStream().use { output ->
+                        input.copyTo(output, 1024 * 1024)
+                    }
+                }
+                checkGguf(temp!!)
+                check(temp!!.renameTo(destination)) { "Не удалось завершить импорт" }
+                newFile = destination
+                modelPrefs.edit().putString("name_" + id, filename.take(120)).apply()
+                activateModel(id)
+                call.resolve(JSObject().apply {
+                    put("imported", true)
+                    put("activeId", id)
+                    put("name", filename.take(120))
+                })
+            } catch (e: Exception) {
+                newFile?.delete()
+                call.reject("Импорт модели не выполнен: " + e.message, e)
+            } finally {
+                temp?.delete()
+                modelLoading.set(false)
+            }
+        }
+    }
+
     @PluginMethod
     fun prepare(call: PluginCall) {
-        val model = java.io.File(context.filesDir, "nova-model.gguf")
-
-        if (!model.isFile) {
+        if (brain.state() == "ModelReady") {
+            call.resolve(JSObject().apply {
+                put("loaded", true)
+                put("model", brain.modelInfo())
+            })
+            return
+        }
+        val id = selectedModelId()
+        if (id == null) {
+            // No model imported: Android file picker requires one explicit action.
             importModel(call)
             return
         }
-
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            call.reject("NOVA уже загружает модель или выполняет задачу")
+            return
+        }
         scope.launch {
             try {
-                brain.loadModel(model.absolutePath)
-                val result = JSObject()
-                result.put("loaded", true)
-                call.resolve(result)
+                activateModel(id)
+                call.resolve(JSObject().apply {
+                    put("loaded", true)
+                    put("model", brain.modelInfo())
+                })
             } catch (e: Exception) {
-                call.reject("Ошибка запуска модели: " + e.toString(), e)
+                call.reject("Ошибка запуска модели: " + e.message, e)
+            } finally {
+                modelLoading.set(false)
             }
         }
     }
@@ -64,6 +291,8 @@ class NovaBrainPlugin : Plugin() {
             result.put("detail", brain.errorDetail())
             result.put("generating", generating.get())
             result.put("councilPhase", councilPhase)
+            result.put("modelLoading", modelLoading.get())
+            result.put("selectedId", selectedModelId() ?: "")
             call.resolve(result)
         } catch (e: Exception) {
             call.reject("NOVA status failed", e)
@@ -108,6 +337,8 @@ class NovaBrainPlugin : Plugin() {
                 }
 
                 brain.loadModel(destination.absolutePath)
+                activeModelId = "legacy"
+                modelPrefs.edit().putString("selected_id", "legacy").apply()
 
                 val response = JSObject()
                 response.put("loaded", true)
@@ -146,7 +377,7 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Message required")
             return
         }
-        if (!generating.compareAndSet(false, true)) {
+        if (modelLoading.get() || !generating.compareAndSet(false, true)) {
             call.reject("NOVA is already generating a reply")
             return
         }

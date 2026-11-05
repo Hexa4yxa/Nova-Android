@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
+import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -17,7 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -88,6 +91,184 @@ class NovaImagePlugin : Plugin() {
         tokenizeCount("NOVA connection test")
     }
 
+
+    // Local Dream 3.x optional controlled mode (the user enables it ONCE in Local Dream).
+    // Port 8808 is local-only from NOVA's perspective; no arbitrary host/URL can be passed in.
+    // Some versions of Local Dream do not implement this API; manual mode is retained.
+    private fun control(path: String, method: String = "GET"): HttpURLConnection {
+        require(path in listOf("/info", "/models", "/status", "/select")) {
+            "Неизвестный маршрут управления"
+        }
+        return (URL("http://127.0.0.1:8808" + path)
+            .openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 2500
+            readTimeout = 6500
+            instanceFollowRedirects = false
+            doOutput = method == "POST"
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+    }
+
+    private fun controlGet(path: String): JSONObject {
+        val conn = control(path)
+        try {
+            check(conn.responseCode == 200) { "Control API HTTP " + conn.responseCode }
+            return conn.inputStream.bufferedReader().use {
+                JSONObject(it.readText().take(256_000))
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun controlPostSelect(id: String, size: Int) {
+        val conn = control("/select", "POST")
+        try {
+            postJson(conn, JSONObject().apply {
+                put("model_id", id)
+                put("width", size)
+                put("height", size)
+            })
+            check(conn.responseCode == 200) {
+                "Local Dream отказал в активации: " + conn.responseCode
+            }
+            val response = conn.inputStream.bufferedReader().use {
+                JSONObject(it.readText().take(4096))
+            }
+            check(response.optBoolean("ok", false)) { "Local Dream не подтвердил выбор модели" }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun managedCatalog(): JSONArray {
+        val info = controlGet("/info")
+        check(info.optString("app") == "localdream" && info.optInt("protocol") == 1) {
+            "Порт управления занят неизвестным сервисом"
+        }
+        return controlGet("/models").optJSONArray("models") ?: JSONArray()
+    }
+
+    private fun preferredImageId(catalog: JSONArray): String? {
+        val models = (0 until catalog.length())
+            .mapNotNull { catalog.optJSONObject(it) }
+        val saved = context.getSharedPreferences("nova_image_manager", 0)
+            .getString("image_id", null)
+        val preferred = models.firstOrNull { it.optString("id") == saved }
+            ?: models.firstOrNull {
+                it.optString("name").contains("Absolute Reality", ignoreCase = true)
+            }
+            ?: models.firstOrNull { it.optBoolean("run_on_cpu", false) }
+            ?: models.firstOrNull()
+        return preferred?.optString("id")?.takeIf { it.isNotBlank() }
+    }
+
+    @PluginMethod
+    fun imageModels(call: PluginCall) {
+        scope.launch {
+            try {
+                val catalog = managedCatalog()
+                val native = controlGet("/status")
+                val entries = JSArray()
+                for (i in 0 until catalog.length()) {
+                    val model = catalog.optJSONObject(i) ?: continue
+                    entries.put(JSObject().apply {
+                        put("id", model.optString("id"))
+                        put("name", model.optString("name"))
+                        put("cpu", model.optBoolean("run_on_cpu", false))
+                        put("selected", model.optString("id") == preferredImageId(catalog))
+                    })
+                }
+                call.resolve(JSObject().apply {
+                    put("managed", true)
+                    put("models", entries)
+                    put("selectedId", preferredImageId(catalog) ?: "")
+                    put("activeId", native.optString("serving_model_id"))
+                    put("state", native.optString("state"))
+                    put("generating", generating.get())
+                })
+            } catch (_: Exception) {
+                call.resolve(JSObject().apply {
+                    put("managed", false)
+                    put("models", JSArray())
+                    put("state", "manual")
+                    put("detail", "Для автоматического выбора моделей открой новую версию Local Dream и включи режим управления устройством. В старой версии выбери модель вручную; NOVA подключится к уже запущенной модели.")
+                })
+            }
+        }
+    }
+
+    @PluginMethod
+    fun selectImageModel(call: PluginCall) {
+        val id = call.getString("id").orEmpty()
+        if (generating.get()) {
+            call.reject("Нельзя переключать модель во время генерации")
+            return
+        }
+        scope.launch {
+            try {
+                val catalog = managedCatalog()
+                check((0 until catalog.length()).any {
+                    catalog.optJSONObject(it)?.optString("id") == id
+                }) { "Такой модели нет среди установленных в Local Dream" }
+                controlPostSelect(id, 512)
+                context.getSharedPreferences("nova_image_manager", 0).edit()
+                    .putString("image_id", id).apply()
+                call.resolve(JSObject().apply {
+                    put("selected", true)
+                    put("id", id)
+                    put("state", "starting")
+                })
+            } catch (e: Exception) {
+                call.reject("Не удалось подключить модель изображений: " + e.message, e)
+            }
+        }
+    }
+
+    private suspend fun ensureImageReady(size: Int) {
+        // Managed mode: verify the SELECTED model, not just any live /tokenize service.
+        // Manual mode: keep supporting older Local Dream builds after user opens one model.
+        val catalog = try { managedCatalog() } catch (_: Exception) { null }
+        if (catalog == null) {
+            requireLocalDream()
+            return
+        }
+
+        val selected = preferredImageId(catalog)
+            ?: error("В Local Dream ещё нет установленных моделей")
+        val current = controlGet("/status")
+        val sameModel = current.optString("state") == "running" &&
+            current.optString("serving_model_id") == selected &&
+            current.optInt("width", size) == size
+        if (sameModel) {
+            try {
+                requireLocalDream()
+                return
+            } catch (_: Exception) { /* backend may still be warming up */ }
+        } else {
+            controlPostSelect(selected, size)
+        }
+
+        repeat(90) {
+            if (cancelRequested.get()) throw IOException("Остановлено")
+            delay(1000L)
+            val status = controlGet("/status")
+            if (status.optString("state") == "error") {
+                throw IOException("Local Dream: " + status.optString("message"))
+            }
+            if (status.optString("state") == "running" &&
+                status.optString("serving_model_id") == selected &&
+                status.optInt("width", size) == size) {
+                try {
+                    requireLocalDream()
+                    return
+                } catch (_: Exception) { /* the token endpoint may not be ready yet */ }
+            }
+        }
+        throw IOException("Local Dream не запустил нужную модель. Проверь режим управления и ограничения батареи.")
+    }
+
     @PluginMethod
     fun status(call: PluginCall) {
         scope.launch {
@@ -129,7 +310,7 @@ class NovaImagePlugin : Plugin() {
 
         scope.launch {
             try {
-                requireLocalDream()
+                ensureImageReady(size)
                 if (cancelRequested.get()) throw IOException("Остановлено пользователем")
                 val (tokens, capacity) = tokenizeCount(prompt)
                 require(tokens <= capacity) {
