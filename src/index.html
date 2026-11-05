@@ -362,12 +362,32 @@ function renderNovaImageStudio(initialPrompt=''){
  const prompt=node(panel,'textarea','nova-image-input');
  prompt.placeholder='Опиши изображение. Для SD 1.5 лучше описание на английском.';
  prompt.value=initialPrompt||imagePromptDraft||'cinematic horror movie still, abandoned bathroom, eerie mirror, blue moonlight, dramatic shadows, realistic 35mm film';
+ node(panel,'p','small','Готовые примеры на английском для лучшего понимания SD 1.5:');
+ const presets=node(panel,'div','tool-actions');
+ const presetValues=[
+  ['👻 Зеркало без лица','cinematic horror film still, old bathroom mirror, human silhouette seen from behind, cold blue moonlight, mysterious reflection, dramatic shadows, realistic 35mm photography, no visible face'],
+  ['🌲 Туманный лес','cinematic dark forest at night, thick mist, moonlight through the trees, wet ground, dramatic atmosphere, detailed realistic photography, no people'],
+  ['🌙 Аниме','anime illustration, mysterious original girl in moonlit forest, gentle magical glow, expressive eyes, detailed background, clean line art, vibrant colors']
+ ];
+ for(const [title,description] of presetValues){
+  const p=node(presets,'button','',title);
+  p.onclick=()=>{prompt.value=description;imagePromptDraft=description;};
+ }
+ const sizeSelect=node(panel,'select','tool-input');
+ sizeSelect.setAttribute('aria-label','Разрешение генерации');
+ for(const [size,label] of [['256','Быстрая проверка · 256×256'],['512','Качественный кадр · 512×512']]){
+  const option=node(sizeSelect,'option','',label);
+  option.value=size;
+ }
+ sizeSelect.value='512';
  const controls=node(panel,'div','tool-actions');
+ const openDream=node(controls,'button','','📱 Открыть Local Dream');
  const check=node(controls,'button','','🔎 Проверить');
  const generate=node(controls,'button','','🎨 Создать 512×512');
+ sizeSelect.onchange=()=>{generate.textContent='🎨 Создать '+sizeSelect.value+'×'+sizeSelect.value;};
  const stop=node(controls,'button','','■ Остановить');
  stop.disabled=!imageBusy;
- const status=node(panel,'div','small nova-image-status','Режим CPU · 20 шагов · сохранение в Галерею/Pictures/NOVA.');
+ const status=node(panel,'div','small nova-image-status','Проверяю Local Dream. CPU · 20 шагов · Галерея/Pictures/NOVA.');
  if(imageLastResult?.preview){
    const img=node(panel,'img','nova-image-preview');
    img.src=imageLastResult.preview;
@@ -376,9 +396,18 @@ function renderNovaImageStudio(initialPrompt=''){
  content.appendChild(panel);
  if(!plugin){
    status.textContent='Для генерации нужна тестовая NOVA с модулем NovaImage.';
-   check.disabled=true;generate.disabled=true;stop.disabled=true;
+   check.disabled=true;generate.disabled=true;stop.disabled=true;openDream.disabled=true;
    return;
  }
+ openDream.onclick=async()=>{
+  openDream.disabled=true;
+  status.textContent='Открываю установленный Local Dream...';
+  try{
+   await plugin.openLocalDream();
+   status.textContent='Выбери Absolute Reality (CPU) и дождись загрузки модели. Затем вернись в NOVA и нажми «Проверить».';
+  }catch(e){status.textContent='⚠ '+(e?.message||String(e));}
+  finally{openDream.disabled=false;}
+ };
  check.onclick=async()=>{
    check.disabled=true;
    status.textContent='Проверяю Local Dream...';
@@ -395,7 +424,7 @@ function renderNovaImageStudio(initialPrompt=''){
    generate.disabled=true;
    stop.disabled=false;
    try{
-     const result=await executeImageGeneration(imagePromptDraft,msg=>{status.textContent=msg;});
+     const result=await executeImageGeneration(imagePromptDraft,msg=>{status.textContent=msg;},Number(sizeSelect.value));
      status.textContent='✅ Готово! '+result.width+'×'+result.height+'. Картинка сохранена в Галерею/Pictures/NOVA.';
      const old=panel.querySelector('.nova-image-preview');
      old?.remove();
@@ -410,6 +439,8 @@ function renderNovaImageStudio(initialPrompt=''){
    try{await plugin.cancel();status.textContent='Остановка запрошена. Local Dream может завершать текущий шаг.';}
    catch(e){status.textContent='⚠ '+e.message;}
  };
+ // Check when this screen opens; avoid user having to press multiple diagnostic buttons.
+ Promise.resolve().then(()=>{if(panel.isConnected && !imageBusy)check.onclick();});
 }
 
 async function showNovaTools(){
