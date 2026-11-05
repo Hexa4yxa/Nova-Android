@@ -533,8 +533,8 @@ async function showBrainManager(){
     // When another phone shares its mobile internet, Android often marks
     // the Wi-Fi as metered. The previous DownloadManager job must be
     // explicitly restarted with new constraints after owner approval.
-    if(state==='paused'&&installed.hotspotDetected&&installed.wifiConnected&&!installed.allowMeteredWifi){
-     add(row,'div','brain-caption','📶 Обнаружена раздача (лимитный Wi-Fi). Старая загрузка заблокирована ограничением. Можно разрешить трафик раздающего телефона и перезапустить её.');
+    if(state==='paused'&&installed.wifiConnected&&!installed.allowMeteredWifi){
+     add(row,'div','brain-caption','📶 Если используешь раздачу другого телефона, Android мог остановить загрузку из-за ограничений сети. Разреши загрузку через раздачу после подтверждения расхода трафика.');
      const permitHotspot=add(row,'button','','📶 Разрешить загрузку через раздачу');
      permitHotspot.onclick=async()=>{
       permitHotspot.disabled=true;
