@@ -19,10 +19,12 @@ internal object NovaComputeGate {
     // seconds. A stale reservation cannot permanently lock the chat.
     private const val IDLE_RESERVATION_NS = 120_000_000_000L
 
+    internal fun reservationExpired(startNs: Long, nowNs: Long): Boolean =
+        startNs != 0L && nowNs - startNs > IDLE_RESERVATION_NS
+
     private fun expireAbandonedLocked() {
         if (imageReserved && !imageRunning &&
-            imageReservedAtNs != 0L &&
-            System.nanoTime() - imageReservedAtNs > IDLE_RESERVATION_NS) {
+            reservationExpired(imageReservedAtNs, System.nanoTime())) {
             imageReserved = false
             imageReservedAtNs = 0L
         }
