@@ -34,8 +34,9 @@ android {
             def councilTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-director-council'
             def toolsTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-tools-approved-downloads'
             def imageTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-local-image-tools'
-            applicationIdSuffix imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test"))))
-            versionNameSuffix imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test"))))
+            def stablePilot = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-image-pilot-stable'
+            applicationIdSuffix stablePilot ? ".imagepilotstable" : ( imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")))))
+            versionNameSuffix stablePilot ? "-imagepilotstable" : ( imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))))
         }
         release {
             minifyEnabled false
