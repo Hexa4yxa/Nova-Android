@@ -46,14 +46,19 @@ test('native library does real diffusion with memory-safe PNG handoff',()=>{
 test('model is chosen and downloaded only after approval, integrity verified',()=>{
  assert.match(installer,/call\.getBoolean\("approved", false\)/);
  assert.match(installer,/AlertDialog\.Builder\(activity\)/);
- assert.match(installer,/setPositiveButton\("Разрешить скачивание"/);
- assert.match(installer,/private fun enqueueRecommended\(\)/);
+ assert.match(installer,/setPositiveButton\("Разрешить загрузку"/);
+ assert.match(installer,/private fun enqueueRecommended\(allowMeteredWifi: Boolean\)/);
  assert.match(installer,/\.commit\(\)/);
  assert.match(installer,/https:\/\/huggingface\.co\//);
  assert.match(installer,/SHA256 = "[0-9a-f]{64}"/);
  assert.match(installer,/MessageDigest\.getInstance\("SHA-256"\)/);
  assert.match(installer,/actual == NovaRecommendedImageModel\.SHA256/);
- assert.match(installer,/setAllowedOverMetered\(false\)/);
+ assert.match(installer,/setAllowedOverMetered\(allowMeteredWifi\)/);
+ assert.match(installer,/eligibleMeteredWifi\(\)/);
+ assert.match(installer,/getBoolean\("allowMeteredWifi", false\)/);
+ assert.match(installer,/putBoolean\("allow_metered_wifi", allowMeteredWifi\)/);
+ assert.match(installer,/if \(allowHotspot && !eligibleMeteredWifi\(\)\)/);
+ assert.match(js,/downloads\.downloadRecommended\(\{approved:true,allowMeteredWifi:true\}\)/);
  assert.match(installer,/PAUSED_WAITING_FOR_NETWORK/);
  assert.match(installer,/PAUSED_QUEUED_FOR_WIFI/);
  assert.match(installer,/PAUSED_WAITING_TO_RETRY/);
