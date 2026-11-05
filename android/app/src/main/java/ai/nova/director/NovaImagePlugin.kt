@@ -84,6 +84,21 @@ class NovaImagePlugin : Plugin() {
     }
 
     @PluginMethod
+    fun openLocalDream(call: PluginCall) {
+        activity.runOnUiThread {
+            try {
+                val launch = context.packageManager.getLaunchIntentForPackage(
+                    "io.github.xororz.localdream"
+                ) ?: throw IllegalStateException("Local Dream не установлен или недоступен")
+                activity.startActivity(launch)
+                call.resolve(JSObject().apply { put("opened", true) })
+            } catch (e: Exception) {
+                call.reject("Не удалось открыть Local Dream: ${e.message}", e)
+            }
+        }
+    }
+
+    @PluginMethod
     fun status(call: PluginCall) {
         scope.launch {
             try {
