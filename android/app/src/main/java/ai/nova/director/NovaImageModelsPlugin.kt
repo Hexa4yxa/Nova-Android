@@ -83,6 +83,7 @@ class NovaImageModelsPlugin : Plugin() {
     private val prefs get() = context.getSharedPreferences("nova_image_downloads", 0)
     private val manager get() = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private val downloadId get() = prefs.getLong("download_id", -1L)
+    private val enqueueing = AtomicBoolean(false)
 
     private fun eligibleMeteredWifi(): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -250,20 +251,20 @@ class NovaImageModelsPlugin : Plugin() {
         }
         activity.runOnUiThread {
             val details = if (allowHotspot) {
-                "РЕЖИМ РАЗДАЧИ WI-FI\\n" +
-                "Модель Stable Diffusion 1.5 · 2,13 ГБ.\\n" +
-                "Разрешить расход интернет-трафика другого телефона?\\n\\n" +
+                "РЕЖИМ РАЗДАЧИ WI-FI\n" +
+                "Модель Stable Diffusion 1.5 · 2,13 ГБ.\n" +
+                "Разрешить расход интернет-трафика другого телефона?\n\n" +
                 "ВАЖНО: Android DownloadManager может перейти на сотовую сеть, " +
                 "если Wi-Fi пропадёт. Перед подтверждением ОТКЛЮЧИ мобильные данные " +
                 "на этом телефоне, оставив Wi-Fi включённым. " +
-                "NOVA не меняет настройки связи самостоятельно.\\n\\n" +
+                "NOVA не меняет настройки связи самостоятельно.\n\n" +
                 "Старая остановленная загрузка будет перезапущена. " +
                 "После завершения проверим SHA-256 и сохраним модель для офлайн-работы."
             } else {
-                "Stable Diffusion 1.5 FP16 · примерно 2,13 ГБ\\n" +
-                "Источник: Comfy-Org / Hugging Face\\n" +
+                "Stable Diffusion 1.5 FP16 · примерно 2,13 ГБ\n" +
+                "Источник: Comfy-Org / Hugging Face\n" +
                 "Только нелимитный Wi-Fi. Если используешь раздачу другого телефона, " +
-                "выбери режим «Скачать через раздачу Wi-Fi».\\n\\n" +
+                "выбери режим «Скачать через раздачу Wi-Fi».\n\n" +
                 "После скачивания NOVA проверит SHA-256. " +
                 "Для безопасного запуска требуется около 4,2 ГБ свободного места."
             }
@@ -278,10 +279,16 @@ class NovaImageModelsPlugin : Plugin() {
                 }
                 .setPositiveButton("Разрешить загрузку") { _, _ ->
                     scope.launch {
+                        if (!enqueueing.compareAndSet(false, true)) {
+                            call.reject("Загрузка уже добавляется в очередь. Проверь её статус.")
+                            return@launch
+                        }
                         try {
                             call.resolve(enqueueRecommended(allowHotspot))
                         } catch (e: Exception) {
                             call.reject("Не удалось начать загрузку: " + e.message, e)
+                        } finally {
+                            enqueueing.set(false)
                         }
                     }
                 }
@@ -300,21 +307,20 @@ class NovaImageModelsPlugin : Plugin() {
             }
         }
         val current = downloadId
-        if (current > 0) {
-            val state = query(current).getString("state")
-            val previousMode = prefs.getBoolean("allow_metered_wifi", false)
-            if (state in listOf("pending", "downloading", "paused", "downloaded") &&
-                previousMode == allowMeteredWifi) {
+        val priorState = if (current > 0) query(current).getString("state") else null
+        if (current > 0 && priorState == "downloaded") {
+            // Do not discard a completed 2GB model merely because a new network
+            // mode was selected. Verify SHA-256 first.
+            verifyDownloaded(current)
+            return JSObject().apply { put("state", "verifying") }
+        }
+        if (current > 0 && priorState in listOf("pending", "downloading", "paused")) {
+            val oldMode = prefs.getBoolean("allow_metered_wifi", false)
+            if (oldMode == allowMeteredWifi) {
                 return JSObject().apply {
-                    put("state", state)
+                    put("state", priorState)
                     put("downloadId", current)
                 }
-            }
-            // DownloadManager cannot change network constraints after enqueue.
-            // Restart when switching from unlimited Wi-Fi to an explicitly
-            // approved hotspot; keep the original model until verified.
-            if (state in listOf("pending", "downloading", "paused", "downloaded")) {
-                manager.remove(current)
             }
         }
         val file = NovaRecommendedImageModel.target(context)
@@ -325,7 +331,11 @@ class NovaImageModelsPlugin : Plugin() {
         require(free > NovaRecommendedImageModel.APPROX_BYTES + 2_000_000_000L) {
             "Для загрузки модели требуется примерно 4,2 ГБ свободного места"
         }
-        // Preserve already verified model bytes; don't overwrite a known-good copy.
+        // Network policy in DownloadManager cannot be changed in place.
+        // We only replace a partial or paused job after storage is checked.
+        if (current > 0 && priorState in listOf("pending", "downloading", "paused")) {
+            manager.remove(current)
+        }
         NovaRecommendedImageModel.invalidate(context)
         if (file.exists()) check(file.delete()) {
             "Нельзя очистить прежнюю неполную загрузку"
