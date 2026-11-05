@@ -35,9 +35,11 @@ object NativeImageEngine {
     }
 
     fun cancel(): Boolean = libraryReady() && nativeCancel()
+    fun progress(): IntArray = if (libraryReady()) nativeProgress() else intArrayOf(0, 0)
     private external fun nativeGenerate(
         modelPath: String, prompt: String, negativePrompt: String,
         size: Int, steps: Int, seed: Long
     ): ByteArray
     private external fun nativeCancel(): Boolean
+    private external fun nativeProgress(): IntArray
 }
