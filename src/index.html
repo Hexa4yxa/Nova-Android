@@ -388,6 +388,8 @@ async function showBrainManager(){
  add(imagePanel,'div','council-heading','🎨 Мозг картинок · NOVA Native');
  const imageState=add(imagePanel,'p','small','Ищу установленные модели изображений...');
  const imagesBox=add(imagePanel,'div','');
+ const imageTestStatus=add(imagePanel,'div','brain-caption','');
+ const imageTestPreview=add(imagePanel,'div','');
  const downloadsBox=add(imagePanel,'div','');
  const openDream=add(imagePanel,'button','council-button','📂 Импортировать модель с телефона');
  const refresh=add(imagePanel,'button','council-button','↻ Проверить мозги');
@@ -452,6 +454,29 @@ async function showBrainManager(){
     add(row,'div','',(item.selected?'✅ ● ':'')+item.name);
     add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+(item.selected?'выбрана для автоматического запуска':'доступна')+(item.testedOnDevice?' · PNG успешно создан':item.validated?' · SHA-256 проверена, генерация ещё не проверена':' · генерация ещё не проверена'));
     if(item.lastError)add(row,'div','brain-caption','⚠ Последняя ошибка: '+item.lastError);
+    if(item.selected && result.installed){
+     const quickTest=add(row,'button','','🧪 Проверить PNG · 256×256');
+     quickTest.disabled=!!(result.generating||imageBusy);
+     quickTest.onclick=async()=>{
+      if(imageBusy)return;
+      quickTest.disabled=true;
+      imageTestStatus.textContent='🧠 Подготавливаю ресурсы NOVA для офлайн-теста...';
+      const prompt='cinematic dark forest at night, soft moonlight, thick mist, realistic photography, no people';
+      try{
+       const answer=await executeImageGeneration(prompt,message=>{imageTestStatus.textContent=message;},256);
+       imageTestStatus.textContent='✅ Первый PNG '+answer.width+'×'+answer.height+' создан внутри NOVA и сохранён в Галерею → Pictures/NOVA. Gemma загрузится при следующем сообщении.';
+       imageTestPreview.replaceChildren();
+       if(answer.preview){
+        const img=add(imageTestPreview,'img','nova-image-preview');
+        img.alt='Результат локального теста NOVA';
+        img.src=answer.preview;
+       }
+       await refreshImages();
+      }catch(error){
+       imageTestStatus.textContent='⚠ Тест не завершился: '+(error?.message||String(error));
+      }finally{quickTest.disabled=false;}
+     };
+    }
     if(!item.selected){
      const select=add(row,'button','','🎨 Выбрать');
      select.disabled=result.generating;
