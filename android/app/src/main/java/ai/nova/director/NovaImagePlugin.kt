@@ -260,7 +260,12 @@ class NovaImagePlugin : Plugin() {
             call.reject("Графический мозг не готов. Импортируй совместимую модель в «Мозги».")
             return
         }
+        if (!NovaComputeGate.beginImage()) {
+            call.reject("Сначала нужно освободить память от текстового мозга NOVA")
+            return
+        }
         if (importing.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.finishImage()
             call.reject("Генератор уже занят")
             return
         }
@@ -306,6 +311,7 @@ class NovaImagePlugin : Plugin() {
             } finally {
                 generating.set(false)
                 monitor.cancel()
+                NovaComputeGate.finishImage()
             }
         }
     }
