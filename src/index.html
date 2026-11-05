@@ -36,6 +36,12 @@ nav .active{color:#999bff;font-weight:bold}
 .council-saved{display:block;width:100%;text-align:left;font-size:13px;padding:10px;margin:8px 0;background:#303b57;overflow-wrap:anywhere}
 .council-check{font-size:13px;margin:7px 0;color:#cad4e8}
 button:disabled{opacity:.45}
+.tool-input{display:block;width:100%;margin:8px 0 14px;padding:12px;color:#f4f5ff;background:#141c2d;border:1px solid #39435e;border-radius:10px;font-size:14px}
+.tool-entry{background:#141c2d;border-radius:12px;padding:12px;margin:10px 0;overflow-wrap:anywhere}
+.tool-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.tool-actions button{padding:10px;font-size:13px;min-height:38px}
+.tool-warning{font-size:12px;color:#c3bfd9;line-height:1.5}
+
 </style>
 </head>
 <body>
@@ -202,6 +208,7 @@ document.querySelectorAll('nav span').forEach(tab=>{
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
   if(selected==='council')return showCouncil();
+   if(selected==='tools')return showNovaTools();
   content.replaceChildren();
   const panel=document.createElement('div');
   panel.className='panel';
@@ -235,6 +242,102 @@ document.querySelectorAll('nav span').forEach(tab=>{
 });
 showChat();
 
+
+
+// Explicit-approval resource tools. No LLM text is ever executed as commands.
+async function showNovaTools(){
+ content.replaceChildren();
+ const tools=window.Capacitor?.Plugins?.NovaTools;
+ const panel=document.createElement('section');
+ panel.className='panel';
+ const add=(parent,tag,cls,value)=>{
+   const node=document.createElement(tag);
+   if(cls)node.className=cls;
+   if(value!==undefined)node.textContent=value;
+   parent.appendChild(node);
+   return node;
+ };
+ add(panel,'div','council-heading','🧰 NOVA Tools — ресурсы');
+ add(panel,'p','tool-warning','Загрузка только по твоему разрешению, с GitHub или Hugging Face. Модель продолжает работать офлайн. APK, скрипты и команды не запускаются.');
+ const url=add(panel,'input','tool-input');
+ url.placeholder='HTTPS-ссылка на ресурс (GitHub или Hugging Face)';
+ url.setAttribute('aria-label','Ссылка HTTPS');
+ const filename=add(panel,'input','tool-input');
+ filename.placeholder='Имя файла, например nova-model.gguf';
+ filename.setAttribute('aria-label','Имя файла');
+ const sha=add(panel,'input','tool-input');
+ sha.placeholder='SHA-256, если известен (необязательно)';
+ sha.setAttribute('aria-label','Ожидаемый SHA-256');
+ const actions=add(panel,'div','tool-actions');
+ const start=add(actions,'button','','📥 Запросить загрузку');
+ const refresh=add(actions,'button','','↻ Обновить');
+ const note=add(panel,'p','small','Нова никогда не скачивает файл без отдельного подтверждения.');
+ content.appendChild(panel);
+ const list=add(content,'section','panel');
+ add(list,'div','council-heading','📁 Загрузки NOVA');
+ const entries=add(list,'div','');
+ if(!tools){
+   note.textContent='В этой версии APK инструменты ещё не подключены.';
+   start.disabled=true;
+   refresh.disabled=true;
+   return;
+ }
+ const fmt=n=>!Number.isFinite(Number(n))||Number(n)<0?'?':(Number(n)/1048576).toFixed(1)+' МБ';
+ async function reload(){
+   entries.replaceChildren();
+   add(entries,'p','small','Проверяю загрузки...');
+   try{
+     const result=await tools.downloads();
+     entries.replaceChildren();
+     const items=Array.isArray(result.items)?result.items:[];
+     if(!items.length){add(entries,'p','small','Пока нет загрузок.');return;}
+     for(const item of items){
+       const row=add(entries,'div','tool-entry');
+       add(row,'div','council-heading',item.name+' · '+item.status);
+       add(row,'p','small','Источник: '+item.host+' · '+fmt(item.bytes)+' / '+fmt(item.total));
+       if(item.reason!==undefined)add(row,'p','small','Код состояния Android: '+item.reason);
+       const buttons=add(row,'div','tool-actions');
+       if(item.status==='complete'){
+         const verify=add(buttons,'button','','🔍 SHA-256');
+         verify.onclick=async()=>{
+           verify.disabled=true;
+           try{
+             const v=await tools.verifySha256({id:item.id});
+             add(row,'p','tool-warning','SHA-256: '+v.sha256+' · '+(v.checksumProvided?(v.verified?'совпадает ✅':'НЕ СОВПАДАЕТ ⚠'):'нет эталонной суммы — подлинность не подтверждена'));
+           }catch(e){note.textContent='Ошибка проверки: '+e.message;}
+           finally{verify.disabled=false;}
+         };
+         const exportBtn=add(buttons,'button','','💾 Сохранить на телефон');
+         exportBtn.onclick=async()=>{
+           exportBtn.disabled=true;
+           try{await tools.exportDownload({id:item.id});note.textContent='Файл сохранён в выбранное место.';}
+           catch(e){note.textContent='Экспорт: '+e.message;}
+           finally{exportBtn.disabled=false;}
+         };
+       }
+       const remove=add(buttons,'button','','✕ Отменить / удалить');
+       remove.onclick=async()=>{
+         remove.disabled=true;
+         try{await tools.cancelDownload({id:item.id});note.textContent='Загрузка удалена.';await reload();}
+         catch(e){note.textContent='Отмена: '+e.message;remove.disabled=false;}
+       };
+     }
+   }catch(e){entries.replaceChildren();add(entries,'p','small','Ошибка: '+e.message);}
+ }
+ start.onclick=async()=>{
+   start.disabled=true;
+   try{
+     const response=await tools.requestDownload({
+       url:url.value.trim(),filename:filename.value.trim(),sha256:sha.value.trim()
+     });
+     note.textContent='Загрузка '+response.name+' поставлена в очередь. Её прогресс отображается ниже и в уведомлениях Android.';
+     await reload();
+   }catch(e){note.textContent='Загрузка не начата: '+e.message;}
+   finally{start.disabled=false;}
+ };
+ refresh.onclick=reload;
+ await reload();
+}
 
 // Offline Director Council v1: three sequential roles using the ONE loaded model.
 // All generated strings are written via textContent (no HTML from LLM).
