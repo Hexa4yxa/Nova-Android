@@ -227,32 +227,46 @@ class NovaImagePlugin : Plugin() {
     }
 
     private suspend fun ensureImageReady(size: Int) {
-        try {
+        // Managed mode: verify the SELECTED model, not just any live /tokenize service.
+        // Manual mode: keep supporting older Local Dream builds after user opens one model.
+        val catalog = try { managedCatalog() } catch (_: Exception) { null }
+        if (catalog == null) {
             requireLocalDream()
             return
-        } catch (original: Exception) {
-            val catalog = try { managedCatalog() } catch (_: Exception) { throw original }
-            val id = preferredImageId(catalog) ?: throw original
+        }
+
+        val selected = preferredImageId(catalog)
+            ?: error("В Local Dream ещё нет установленных моделей")
+        val current = controlGet("/status")
+        val sameModel = current.optString("state") == "running" &&
+            current.optString("serving_model_id") == selected &&
+            current.optInt("width", size) == size
+        if (sameModel) {
+            try {
+                requireLocalDream()
+                return
+            } catch (_: Exception) { /* backend may still be warming up */ }
+        } else {
+            controlPostSelect(selected, size)
+        }
+
+        repeat(90) {
+            if (cancelRequested.get()) throw IOException("Остановлено")
+            delay(1000L)
             val status = controlGet("/status")
-            if (status.optString("state") != "running" ||
-                status.optString("serving_model_id") != id) {
-                controlPostSelect(id, size)
+            if (status.optString("state") == "error") {
+                throw IOException("Local Dream: " + status.optString("message"))
             }
-            repeat(90) {
-                if (cancelRequested.get()) throw IOException("Остановлено")
-                delay(1000L)
-                val current = controlGet("/status")
-                if (current.optString("state") == "error") {
-                    throw IOException("Local Dream: " + current.optString("message"))
-                }
-                if (current.optString("state") == "running" &&
-                    current.optString("serving_model_id") == id) {
+            if (status.optString("state") == "running" &&
+                status.optString("serving_model_id") == selected &&
+                status.optInt("width", size) == size) {
+                try {
                     requireLocalDream()
                     return
-                }
+                } catch (_: Exception) { /* the token endpoint may not be ready yet */ }
             }
-            throw IOException("Local Dream не запустил модель. Проверь режим управления и ограничения батареи.")
         }
+        throw IOException("Local Dream не запустил нужную модель. Проверь режим управления и ограничения батареи.")
     }
 
     @PluginMethod
