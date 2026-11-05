@@ -434,6 +434,18 @@ async function showBrainManager(){
       models.some(item=>item.testedOnDevice)?'✅ NOVA Native: генерация PNG уже подтверждена на этом телефоне.':
       models.length?'ℹ Графическая модель установлена. Создание PNG на этом телефоне ещё не проверено.':
       'ℹ Движок встроен. Для картинок нужна собственная модель в NOVA, добавь её один раз.';
+   if(models.length){
+    try{
+     const resources=await image.status();
+     const free=Number(resources.freeMemoryMib);
+     if(Number.isFinite(free)&&free>=0){
+      add(imagesBox,'p','brain-caption','💾 RAM свободно сейчас: '+Math.floor(free)+' МиБ. Перед рисованием NOVA освободит память Gemma и перепроверит ресурсы.');
+     }
+     if(resources.resourceWarning){
+      add(imagesBox,'p','brain-caption','⚠ Предварительная проверка: '+resources.resourceWarning);
+     }
+    }catch(error){console.warn('NOVA: проверка RAM недоступна',error);}
+   }
    if(!models.length)add(imagesBox,'p','brain-caption','Встроенный генератор установлен. Для первого запуска нужна графическая модель SD 1.5. Ниже можно скачать проверенный вариант прямо в NOVA, без других приложений.');
    for(const item of models){
     const row=add(imagesBox,'div','brain-row');
@@ -588,7 +600,8 @@ function renderNovaImageStudio(initialPrompt=''){
    try{
      const response=await plugin.status();
      status.textContent=(response.ready?(response.testedOnDevice?'✅ ':'ℹ '):'⚠ ')+(response.detail||'Нет данных')+
-       (Number.isFinite(Number(response.freeMemoryMib))?'\nСвободно RAM: '+response.freeMemoryMib+' МиБ':'');
+       (Number.isFinite(Number(response.freeMemoryMib))?'\nСвободно RAM: '+response.freeMemoryMib+' МиБ':'')+
+       (response.resourceWarning?'\n⚠ Предварительная проверка: '+response.resourceWarning:'');
    }catch(e){status.textContent='⚠ '+(e?.message||String(e));}
    finally{check.disabled=false;}
  };
