@@ -35,8 +35,9 @@ android {
             def toolsTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-tools-approved-downloads'
             def imageTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-local-image-tools'
             def imageHardening = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-image-hardening'
-            applicationIdSuffix imageHardening ? ".imageqa" : (imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")))))
-            versionNameSuffix imageHardening ? "-imageqa" : (imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))))
+            def brainsAuto = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-brains-auto'
+            applicationIdSuffix brainsAuto ? ".brainslab" : (applicationIdSuffix imageHardening ? ".imageqa" : (imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test"))))))
+            versionNameSuffix brainsAuto ? "-brainslab" : (versionNameSuffix imageHardening ? "-imageqa" : (imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test"))))))
         }
         release {
             minifyEnabled false
