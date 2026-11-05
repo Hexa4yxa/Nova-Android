@@ -85,6 +85,18 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+      - name: Publish isolated NOVA Tools test APK
+        if: github.ref == 'refs/heads/feature/nova-tools-approved-downloads'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Tools-Lab.apk
+          gh release create "nova-tools-lab-${{ github.run_number }}" release/NOVA-Tools-Lab.apk \
+            --title "NOVA Tools Lab #${{ github.run_number }}" \
+            --notes "Experimental standalone test build. Explicit confirmation for HTTPS downloads, SHA-256 and export. Does not autonomously install software or replace Director Lab. On-device functionality unverified." \
+            --prerelease --target "${{ github.sha }}"
+
       - name: Publish Director Council test APK
         if: github.ref == 'refs/heads/feature/nova-director-council'
         env:
