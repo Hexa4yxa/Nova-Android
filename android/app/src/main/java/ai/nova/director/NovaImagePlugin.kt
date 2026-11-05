@@ -99,7 +99,7 @@ class NovaImagePlugin : Plugin() {
                 put("detail", when {
                     error != null -> "Нативная библиотека недоступна: $error"
                     model == null -> "Добавь модель изображений через «Мозги». Нужен совместимый checkpoint SD 1.5; текстовая Gemma GGUF не подходит."
-                    else -> "Выбрана модель изображений NOVA. Создание выполняется в приложении."
+                    else -> "Графическая модель найдена. Пробная генерация подтвердит её совместимость; всё работает внутри NOVA."
                 })
             })
         } catch (e: Exception) { call.reject("Проверка: $e", e) }
@@ -117,6 +117,7 @@ class NovaImagePlugin : Plugin() {
                     put("bytes", file.length())
                     put("selected", id == key)
                     put("cpu", true)
+                    put("validated", false)
                 })
             }
             call.resolve(JSObject().apply {
@@ -190,6 +191,9 @@ class NovaImagePlugin : Plugin() {
                 val reported = context.contentResolver.openFileDescriptor(uri, "r")?.use {
                     it.statSize
                 } ?: -1L
+                require(available > 2_000_000_000L) {
+                    "На телефоне осталось менее 2 ГБ свободного места"
+                }
                 if (reported > 0) require(available - reported > 2_000_000_000L) {
                     "Недостаточно места. Оставь хотя бы 2 ГБ после импорта."
                 }
@@ -203,6 +207,11 @@ class NovaImagePlugin : Plugin() {
                             if (n < 0) break
                             total += n
                             require(total <= 8_000_000_000L) { "Модель больше 8 ГБ" }
+                            if (total % (16L * 1024 * 1024) < n) {
+                                require(StatFs(dir().absolutePath).availableBytes > 2_000_000_000L) {
+                                    "Недостаточно места для безопасного импорта. Частичный файл будет удалён."
+                                }
+                            }
                             dest.write(buffer, 0, n)
                         }
                     }
