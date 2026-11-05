@@ -1,6 +1,7 @@
 package ai.nova.director
 
 import android.content.ContentValues
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
@@ -22,6 +23,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URL
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,7 +45,7 @@ class NovaImagePlugin : Plugin() {
 
     private fun connect(path: String, timeoutMs: Int): HttpURLConnection {
         check(path == "/tokenize" || path == "/generate") { "Недопустимый локальный маршрут" }
-        return (URL("http://127.0.0.1:8081$path").openConnection() as HttpURLConnection).apply {
+        return (URL("http://127.0.0.1:8081$path").openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
             requestMethod = "POST"
             instanceFollowRedirects = false
             connectTimeout = 2500
@@ -62,21 +64,28 @@ class NovaImagePlugin : Plugin() {
         }
     }
 
-    private fun requireLocalDream() {
+    private fun tokenizeCount(prompt: String): Pair<Int, Int> {
         val probe = connect("/tokenize", 6000)
         try {
-            postJson(probe, JSONObject().put("prompt", "NOVA connection test"))
+            postJson(probe, JSONObject().put("prompt", prompt))
             check(probe.responseCode == 200) {
-                "На порту 8081 не найден API Local Dream (HTTP ${probe.responseCode})"
+                "Порт 8081 не отвечает как Local Dream (HTTP ${probe.responseCode})"
             }
             val reply = probe.inputStream.bufferedReader().use { it.readText().take(4096) }
             val json = JSONObject(reply)
-            check(json.optInt("max_length", 0) == 77 && json.optInt("count", 0) > 0) {
-                "Порт 8081 занят другим приложением, а не Local Dream"
+            val max = json.optInt("max_length", 0)
+            val count = json.optInt("count", 0)
+            check(max == 77 && count > 0) {
+                "Порт 8081 занят другим сервисом или отвечает неверно"
             }
+            return count to max
         } finally {
             probe.disconnect()
         }
+    }
+
+    private fun requireLocalDream() {
+        tokenizeCount("NOVA connection test")
     }
 
     @PluginMethod
@@ -121,6 +130,11 @@ class NovaImagePlugin : Plugin() {
         scope.launch {
             try {
                 requireLocalDream()
+                if (cancelRequested.get()) throw IOException("Остановлено пользователем")
+                val (tokens, capacity) = tokenizeCount(prompt)
+                require(tokens <= capacity) {
+                    "Описание содержит $tokens токенов, а модель понимает только $capacity. Сократи описание и попробуй снова."
+                }
                 if (cancelRequested.get()) throw IOException("Остановлено пользователем")
 
                 val payload = JSONObject().apply {
@@ -236,6 +250,26 @@ class NovaImagePlugin : Plugin() {
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e
+        }
+    }
+
+    @PluginMethod
+    fun openLocalDream(call: PluginCall) {
+        activity.runOnUiThread {
+            try {
+                val launch = context.packageManager.getLaunchIntentForPackage(
+                    "io.github.xororz.localdream"
+                )
+                if (launch == null) {
+                    call.reject("Local Dream не обнаружен на телефоне")
+                } else {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launch)
+                    call.resolve(JSObject().apply { put("opened", true) })
+                }
+            } catch (e: Exception) {
+                call.reject("Не удалось открыть Local Dream: ${e.message}", e)
+            }
         }
     }
 
