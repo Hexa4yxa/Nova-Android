@@ -71,11 +71,30 @@ class NovaImagePlugin : Plugin() {
             }
             val reply = probe.inputStream.bufferedReader().use { it.readText().take(4096) }
             val json = JSONObject(reply)
-            check(json.optInt("max_length", 0) == 77 && json.optInt("count", 0) > 0) {
-                "Порт 8081 занят другим приложением, а не Local Dream"
+            // Local Dream returns max_length=0 for its unchunked tokenizer.
+            // Only the response SHAPE identifies the native tokenizer; the
+            // exact context length depends on the selected model.
+            check(json.has("count") && json.has("max_length") &&
+                json.optInt("count", -1) >= 0 && json.optInt("max_length", -1) >= 0) {
+                "Порт 8081 занят другим сервером или модель Local Dream не запущена"
             }
         } finally {
             probe.disconnect()
+        }
+    }
+
+    @PluginMethod
+    fun openLocalDream(call: PluginCall) {
+        activity.runOnUiThread {
+            try {
+                val launch = context.packageManager.getLaunchIntentForPackage(
+                    "io.github.xororz.localdream"
+                ) ?: throw IllegalStateException("Local Dream не установлен или недоступен")
+                activity.startActivity(launch)
+                call.resolve(JSObject().apply { put("opened", true) })
+            } catch (e: Exception) {
+                call.reject("Не удалось открыть Local Dream: ${e.message}", e)
+            }
         }
     }
 
@@ -132,6 +151,9 @@ class NovaImagePlugin : Plugin() {
                     put("scheduler", "dpm")
                     put("use_opencl", false)
                     put("show_diffusion_process", false)
+                    // Newer Local Dream versions return ready-to-save PNG.
+                    // Older versions silently fall back to raw RGB.
+                    put("output_format", "png")
                 }
                 val connection = connect("/generate", 25 * 60 * 1000)
                 activeConnection = connection
@@ -176,34 +198,42 @@ class NovaImagePlugin : Plugin() {
                 val height = result.getInt("height")
                 check(width in 128..512 && height in 128..512) { "Недопустимый размер полученного изображения" }
                 check(result.optInt("channels") == 3) { "Неподдерживаемый формат изображения" }
-                val rgb = Base64.decode(result.getString("image"), Base64.DEFAULT)
-                check(rgb.size == width * height * 3) { "Неполные данные изображения" }
-
-                val pixels = NovaImagePixels.toArgb(rgb, width, height)
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                try {
-                    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-                    val png = ByteArrayOutputStream().use { output ->
-                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                            "Не удалось подготовить PNG"
-                        }
-                        output.toByteArray()
+                val data = Base64.decode(result.getString("image"), Base64.DEFAULT)
+                val format = result.optString("format", "raw")
+                val png = when (format) {
+                    "png" -> {
+                        NovaImageWire.validatePng(data, width, height)
+                        data
                     }
-                    val uri = saveToGallery(png)
-                    call.resolve(JSObject().apply {
-                        put("ready", true)
-                        put("saved", true)
-                        put("imageUri", uri.toString())
-                        put("preview", "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP))
-                        put("width", width)
-                        put("height", height)
-                        put("seed", result.optLong("seed"))
-                        put("generationTimeMs", result.optLong("generation_time_ms"))
-                        put("backend", "Local Dream CPU")
-                    })
-                } finally {
-                    bitmap.recycle()
+                    "raw" -> {
+                        val pixels = NovaImagePixels.toArgb(data, width, height)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        try {
+                            bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+                            ByteArrayOutputStream().use { output ->
+                                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                                    "Не удалось подготовить PNG"
+                                }
+                                output.toByteArray()
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                    else -> error("Неожиданный формат от Local Dream: $format")
                 }
+                val uri = saveToGallery(png)
+                call.resolve(JSObject().apply {
+                    put("ready", true)
+                    put("saved", true)
+                    put("imageUri", uri.toString())
+                    put("preview", "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP))
+                    put("width", width)
+                    put("height", height)
+                    put("seed", result.optLong("seed"))
+                    put("generationTimeMs", result.optLong("generation_time_ms"))
+                    put("backend", "Local Dream CPU")
+                })
             } catch (e: Exception) {
                 val detail = e.message ?: e.javaClass.simpleName
                 call.reject("Создание изображения не завершено: $detail", e)
