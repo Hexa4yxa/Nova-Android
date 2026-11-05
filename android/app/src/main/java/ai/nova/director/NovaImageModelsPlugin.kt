@@ -3,6 +3,8 @@ package ai.nova.director
 import android.app.DownloadManager
 import android.app.AlertDialog
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
@@ -82,6 +84,33 @@ class NovaImageModelsPlugin : Plugin() {
     private val manager get() = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private val downloadId get() = prefs.getLong("download_id", -1L)
 
+    // Explicitly state which network constraints are preventing a large model
+    // download. A Wi-Fi icon alone does not mean Android considers it unmetered.
+    private fun networkDescription(): String {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val capabilities = cm.getNetworkCapabilities(cm.activeNetwork)
+            ?: return "Нет активной сети Android. Проверь Wi-Fi и авиарежим."
+        val usable = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        val wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        val unmetered = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        return when {
+            !usable -> "Android не подтвердил доступ в интернет. Проверь Wi-Fi и авиарежим."
+            !wifi -> "Есть интернет, но не через Wi-Fi. Для модели 2,13 ГБ NOVA намеренно не использует мобильные данные."
+            !unmetered -> "Wi-Fi подключён, но Android считает сеть лимитной. В настройках этой Wi-Fi-сети выбери «Безлимитная»/«Не тарифицируемая», если тариф действительно безлимитный."
+            else -> "Wi-Fi подключён и не лимитный. Android должен автоматически продолжить загрузку."
+        }
+    }
+
+    private fun pausedExplanation(reason: Long): String = when (reason.toInt()) {
+        DownloadManager.PAUSED_WAITING_TO_RETRY ->
+            "Система ожидает повторного соединения с сервером. Обычно загрузка продолжается автоматически."
+        DownloadManager.PAUSED_WAITING_FOR_NETWORK ->
+            "Ожидание сети, разрешённой для загрузки. " + networkDescription()
+        DownloadManager.PAUSED_QUEUED_FOR_WIFI ->
+            "Android ждёт подходящий Wi-Fi для большого файла. " + networkDescription()
+        else -> "Android временно остановил загрузку. " + networkDescription()
+    }
+
     private fun query(id: Long): JSObject {
         manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
             if (cursor == null || !cursor.moveToFirst()) {
@@ -92,6 +121,7 @@ class NovaImageModelsPlugin : Plugin() {
                 return if (index >= 0) cursor.getLong(index) else -1L
             }
             val status = number(DownloadManager.COLUMN_STATUS).toInt()
+            val reason = number(DownloadManager.COLUMN_REASON)
             return JSObject().apply {
                 put("state", when (status) {
                     DownloadManager.STATUS_PENDING -> "pending"
@@ -103,7 +133,10 @@ class NovaImageModelsPlugin : Plugin() {
                 })
                 put("received", number(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
                 put("total", number(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                put("reason", number(DownloadManager.COLUMN_REASON))
+                put("reason", reason)
+                if (status == DownloadManager.STATUS_PAUSED) {
+                    put("pauseExplanation", pausedExplanation(reason))
+                }
             }
         }
     }
