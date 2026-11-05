@@ -54,6 +54,14 @@ test('model is chosen and downloaded only after approval, integrity verified',()
  assert.match(installer,/MessageDigest\.getInstance\("SHA-256"\)/);
  assert.match(installer,/actual == NovaRecommendedImageModel\.SHA256/);
  assert.match(installer,/setAllowedOverMetered\(false\)/);
+ assert.match(installer,/PAUSED_WAITING_FOR_NETWORK/);
+ assert.match(installer,/PAUSED_QUEUED_FOR_WIFI/);
+ assert.match(installer,/PAUSED_WAITING_TO_RETRY/);
+ assert.match(installer,/NET_CAPABILITY_NOT_METERED/);
+ assert.match(installer,/put\("pauseExplanation", pausedExplanation\(reason\)\)/);
+ assert.match(js,/installed\.pauseExplanation/);
+ const manifest=read('android/app/src/main/AndroidManifest.xml');
+ assert.match(manifest,/android\.permission\.ACCESS_NETWORK_STATE/);
  assert.match(installer,/setDestinationInExternalFilesDir/);
  assert.match(installer,/putString\("selected_id", ID\)/);
  assert.match(installer,/STATUS_FAILED/);
