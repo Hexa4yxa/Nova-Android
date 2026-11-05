@@ -38,3 +38,9 @@ test('image studio has working preset choices and an explicit cancel action',()=
  assert.match(js,/imageStop\.onclick/);
  assert.match(js,/NovaImage\?\.cancel\(\)/);
 });
+
+test('a user can open Local Dream without browsing Android app drawer',()=>{
+ assert.match(js,/openLocal\.onclick=async/);
+ assert.match(js,/plugin\.openLocalDream\(\)/);
+ assert.match(html,/Открыть Local Dream/);
+});
