@@ -24,6 +24,9 @@ test('image command does not route a normal chat message',()=>{
  assert.ok(re.test('Зроби зображення туманний ліс'));
  assert.ok(re.test('Нова, сделай страшную картинку с зеркалом'));
  assert.ok(re.test('Сделай мне красивую картинку'));
+ assert.ok(re.test('Возьми и создай мне картинку солдата ВСУ'));
+ assert.ok(re.test('Візьми и зроби зображення лісу'));
+
  assert.equal(re.test('Привет, Нова'),false);
  assert.equal(re.test('Создай видео'),false);
  assert.equal(re.test('Не создавай картинку'),false);
@@ -43,4 +46,18 @@ test('local drawing calls are explicit and diagnostics are available',()=>{
  assert.match(js,/Туманный лес/);
  assert.match(js,/Аниме/);
  assert.match(js,/img\.src=result\.preview/);
+});
+
+test('quality path uses the actual offline image engine and optional LLM scene planner',()=>{
+ assert.match(js,/brain\.planImagePrompt\(\{prompt:/);
+ assert.match(js,/await brain\.releaseForImage\(\)/);
+ assert.ok(js.indexOf("brain.planImagePrompt({prompt:")<js.indexOf("brain.releaseForImage()"),
+   'scene must be planned before unloading the text model');
+ assert.match(js,/steps:size===256\?16:24/);
+ assert.match(js,/size=512\)/);
+ assert.match(js,/sizeSelect\.value='512'/);
+ assert.match(js,/imageNegativePrompt/);
+ assert.match(js,/imageEnhancedPrompt/);
+ assert.match(js,/imageLastResult\?\.saved/);
+ assert.match(js,/Вот результат/);
 });
