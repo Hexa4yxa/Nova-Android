@@ -39,6 +39,10 @@ test('native library does real diffusion with memory-safe PNG handoff',()=>{
 
 test('model is chosen and downloaded only after approval, integrity verified',()=>{
  assert.match(installer,/call\.getBoolean\("approved", false\)/);
+ assert.match(installer,/AlertDialog\.Builder\(activity\)/);
+ assert.match(installer,/setPositiveButton\("Разрешить скачивание"/);
+ assert.match(installer,/private fun enqueueRecommended\(\)/);
+ assert.match(installer,/\.commit\(\)/);
  assert.match(installer,/https:\/\/huggingface\.co\//);
  assert.match(installer,/SHA256 = "[0-9a-f]{64}"/);
  assert.match(installer,/MessageDigest\.getInstance\("SHA-256"\)/);
