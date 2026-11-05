@@ -245,8 +245,20 @@ async function handleCapabilityMessage(text,route){
  showChat();
  try{
   const registry=window.NovaToolRegistry;
-  if(!registry)throw new Error('Каталог возможностей NOVA недоступен');
-  waiting.text=await registry.describeCapability(route,window.Capacitor?.Plugins||{});
+  if(registry){
+   waiting.text=await registry.describeCapability(route,window.Capacitor?.Plugins||{});
+  }else if(route.tool==='image'){
+   const image=window.Capacitor?.Plugins?.NovaImage;
+   if(!image?.status)throw new Error('Графический модуль NOVA недоступен');
+   const state=await image.status();
+   waiting.text=state.ready?
+    (state.testedOnDevice?
+     'Да! Я уже создавала PNG прямо внутри NOVA. Напиши «Нарисуй тёмный лес в тумане» — запущу встроенный графический движок.':
+     'Да, графический движок подключён. Напиши «Нарисуй тёмный лес в тумане», чтобы проверить создание PNG.') :
+    'Генератор встроен, но модель пока не готова. '+(state.detail||'Открой вкладку «Мозги».');
+  }else{
+   throw new Error('Каталог возможностей NOVA недоступен');
+  }
  }catch(error){
   waiting.text='⚠ Не удалось проверить инструмент: '+(error?.message||String(error));
  }finally{
