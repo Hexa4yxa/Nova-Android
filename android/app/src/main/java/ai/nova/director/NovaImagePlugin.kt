@@ -2,6 +2,7 @@ package ai.nova.director
 
 import ai.nova.image.NativeImageEngine
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -39,6 +40,18 @@ class NovaImagePlugin : Plugin() {
     private val generating = AtomicBoolean(false)
     private val importing = AtomicBoolean(false)
     private val prefs get() = context.getSharedPreferences("nova_image_native", 0)
+    private fun verified(id: String?) =
+        id != null && prefs.getString("last_success_model_id", null) == id
+    private fun lastError(id: String?) =
+        if (id != null && prefs.getString("last_error_model_id", null) == id)
+            prefs.getString("last_error", null) else null
+    private fun availableMemoryMib(): Long {
+        val service = context.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+            as ActivityManager
+        val memory = ActivityManager.MemoryInfo()
+        service.getMemoryInfo(memory)
+        return memory.availMem / (1024 * 1024)
+    }
 
     private fun dir() = File(context.filesDir, "visual-models").also {
         check(it.isDirectory || it.mkdirs()) { "Не удаётся создать хранилище" }
@@ -102,10 +115,15 @@ class NovaImagePlugin : Plugin() {
                 put("backend", "NOVA Native Image CPU")
                 put("generating", generating.get())
                 put("selectedId", model ?: "")
+                put("testedOnDevice", verified(model))
+                put("lastError", lastError(model) ?: "")
+                put("freeMemoryMib", availableMemoryMib())
                 put("detail", when {
                     error != null -> "Нативная библиотека недоступна: $error"
                     model == null -> "Добавь модель изображений через «Мозги». Нужен совместимый checkpoint SD 1.5; текстовая Gemma GGUF не подходит."
-                    else -> "Графическая модель найдена. Пробная генерация подтвердит её совместимость; всё работает внутри NOVA."
+                    verified(model) -> "✅ Эта графическая модель уже создала PNG внутри NOVA на этом устройстве."
+                    lastError(model) != null -> "Последний тест неудачен: " + lastError(model)
+                    else -> "Модель установлена, но генерация на этом телефоне ещё не проверена."
                 })
             })
         } catch (e: Exception) { call.reject("Проверка: $e", e) }
@@ -126,6 +144,8 @@ class NovaImagePlugin : Plugin() {
                     put("selected", id == key)
                     put("cpu", true)
                     put("validated", key == NovaRecommendedImageModel.ID)
+                    put("testedOnDevice", verified(key))
+                    put("lastError", lastError(key) ?: "")
                 })
             }
             call.resolve(JSObject().apply {
@@ -305,8 +325,14 @@ class NovaImagePlugin : Plugin() {
                             Base64.encodeToString(png, Base64.NO_WRAP))
                         put("backend", "NOVA Native CPU")
                     })
+                    prefs.edit().putString("last_success_model_id", selected())
+                        .remove("last_error_model_id").remove("last_error").apply()
                 } finally { bitmap.recycle() }
             } catch (e: Exception) {
+                prefs.edit()
+                    .putString("last_error_model_id", selected())
+                    .putString("last_error", (e.message ?: e.javaClass.simpleName).take(350))
+                    .apply()
                 call.reject("Нативная генерация не завершена: $e", e)
             } finally {
                 generating.set(false)
