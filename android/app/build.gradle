@@ -8,8 +8,8 @@ android {
         applicationId "ai.nova.director"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode (System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1').toInteger()
+        versionName "1.0." + (System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -20,6 +20,19 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+    }
+    // Stable NOVA must use an owner-controlled signing key that survives CI runs.
+    // No keystores or passwords are ever stored in the repository.
+    signingConfigs {
+        novaStable {
+            def keystorePath = System.getenv('NOVA_STABLE_KEYSTORE_PATH')
+            if (keystorePath != null && !keystorePath.isEmpty()) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('NOVA_STABLE_STORE_PASSWORD')
+                keyAlias System.getenv('NOVA_STABLE_KEY_ALIAS')
+                keyPassword System.getenv('NOVA_STABLE_KEY_PASSWORD')
+            }
         }
     }
     buildTypes {
@@ -41,6 +54,10 @@ android {
             versionNameSuffix nativeImage ? "-nativeimage" : (brainsAuto ? "-brainslab" : (imageHardening ? "-imageqa" : (imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))))))
         }
         release {
+            // First stable install is a separate package because past debug APKs
+            // had different CI signing keys. Future stable versions update in place.
+            applicationIdSuffix ".stable"
+            signingConfig signingConfigs.novaStable
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
