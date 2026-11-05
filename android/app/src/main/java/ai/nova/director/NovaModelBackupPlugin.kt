@@ -1,6 +1,8 @@
 package ai.nova.director
 
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.StatFs
@@ -85,6 +87,31 @@ class NovaModelBackupPlugin : Plugin() {
     }
 
     private fun restore(uri: Uri): JSObject {
+        // Never race a partial DownloadManager write against a restore.
+        require(!NovaComputeGate.isImageReserved()) {
+            "NOVA сейчас выполняет графическую задачу. Дождись её завершения."
+        }
+        val downloads = context.getSharedPreferences("nova_image_downloads", 0)
+        val activeDownload = downloads.getLong("download_id", -1L)
+        if (activeDownload > 0) {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val unfinished = dm.query(DownloadManager.Query().setFilterById(activeDownload))
+                ?.use { cursor ->
+                    if (!cursor.moveToFirst()) false else {
+                        val col = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                        val status = if (col >= 0) cursor.getInt(col) else 0
+                        status in listOf(
+                            DownloadManager.STATUS_RUNNING,
+                            DownloadManager.STATUS_PENDING,
+                            DownloadManager.STATUS_PAUSED,
+                            DownloadManager.STATUS_SUCCESSFUL
+                        )
+                    }
+                } ?: false
+            require(!unfinished) {
+                "NOVA ещё скачивает или проверяет графическую модель. Заверши эту операцию перед восстановлением."
+            }
+        }
         // Explicitly matching the filename stops accidental imports of text GGUF
         // or an arbitrary file selected from Downloads.
         val filename = context.contentResolver.query(
