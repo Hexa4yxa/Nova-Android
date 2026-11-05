@@ -35,7 +35,8 @@ test('history stores only lightweight text, not base64 images',()=>{
 
 test('local drawing calls are explicit and diagnostics are available',()=>{
  assert.match(js,/const drawCommand=/);
- assert.match(js,/openLocalDream/);
+ assert.match(js,/importImageModel/);
+ assert.match(js,/releaseForImage/);
  assert.match(js,/check\.onclick\(\)/);
  assert.match(js,/Number\(sizeSelect\.value\)/);
  assert.match(js,/Зеркало без лица/);
