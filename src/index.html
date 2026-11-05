@@ -140,15 +140,21 @@ let awaitingImageDescription=false;
 let imageBusy=false;
 let imageLastResult=null;
 let imagePromptDraft='';
-const imageCommand=/^\s*(?:нова[,\s]+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\s+(?:мне\s+)?(?:картинку|изображение|фото|фотографию|кадр|малюнок|зображення)(?:\s*[:\-–]\s*|\s+|$)/i;
+const imageCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\s+(?:мне\s+)?((?:(?:[а-яіїєґ-]+\s+){0,3})?)(?:картинку|изображение|фото|фотографию|кадр|картинку|малюнок|зображення)(?:\s*[:.,–-]?\s*|$)/iu;
+const drawCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:нарисуй|намалюй)\s+(.+)$/iu;
 
 function imageRequest(text){
- const match=text.match(imageCommand);
- if(!match)return null;
- return text.slice(match[0].length).trim();
+ const explicit=text.match(imageCommand);
+ if(explicit){
+   const extras=(explicit[1]||'').trim();
+   const tail=text.slice(explicit[0].length).trim();
+   return [extras,tail].filter(Boolean).join(', ');
+ }
+ const draw=text.match(drawCommand);
+ return draw?draw[1].trim():null;
 }
 
-async function executeImageGeneration(prompt,onProgress=()=>{}){
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -162,7 +168,7 @@ async function executeImageGeneration(prompt,onProgress=()=>{}){
      const total=e.total||20;
      onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов. Работа офлайн.');
    });
-   const result=await bridge.generate({prompt,negative:'deformed face, distorted, blurry, poor anatomy, text, watermark',size:512});
+   const result=await bridge.generate({prompt,negative:'deformed face, distorted, blurry, poor anatomy, text, watermark',size});
    imageLastResult=result;
    imagePromptDraft=prompt;
    return result;
