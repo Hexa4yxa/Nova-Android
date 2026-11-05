@@ -33,6 +33,12 @@ test('native library does real diffusion with memory-safe PNG handoff',()=>{
  assert.match(cmake,/add_library\(nova-image SHARED/);
  assert.match(cmake,/stable-diffusion/);
  assert.match(kotlin,/NativeImageEngine\.generate\(/);
+ assert.match(kotlin,/last_success_model_id/);
+ assert.match(kotlin,/last_error_model_id/);
+ assert.match(kotlin,/freeMemoryMib/);
+ assert.match(js,/item\.testedOnDevice/);
+ assert.match(js,/item\.lastError/);
+ assert.match(js,/response\.testedOnDevice/);
  assert.match(kotlin,/MediaStore\.Images\.Media\.IS_PENDING/);
  assert.doesNotMatch(kotlin,/127\.0\.0\.1/);
 });
