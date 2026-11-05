@@ -33,8 +33,9 @@ android {
             def gemmaTest = System.getenv('GITHUB_REF') == 'refs/heads/experiment/nova-gemma'
             def councilTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-director-council'
             def toolsTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-tools-approved-downloads'
-            applicationIdSuffix toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")))
-            versionNameSuffix toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))
+            def imageTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-local-image-tools'
+            applicationIdSuffix imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test"))))
+            versionNameSuffix imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test"))))
         }
         release {
             minifyEnabled false
