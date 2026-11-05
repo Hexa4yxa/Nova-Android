@@ -73,4 +73,9 @@ test('NOVA webview includes registry before main script and routes BEFORE Gemma'
  const gemma=inline.indexOf('const answer=await brain.chat({message:text,requestId})');
  assert.ok(capability>=0&&gemma>capability);
  assert.match(inline,/handleCapabilityMessage\(text,capability\)/);
+ assert.match(inline,/route\.tool==='image'/);
+ assert.match(inline,/await image\.status\(\)/);
+ assert.match(inline,/history\.slice\(-6\)/);
+ assert.match(inline,/\{kind:'capability',tool:'image'\}/);
+
 });
