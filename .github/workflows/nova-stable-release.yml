@@ -91,6 +91,10 @@ jobs:
         run: |
           node --test tests/council-ui.test.cjs tests/nova-tools-ui.test.cjs tests/nova-image-ui.test.cjs tests/nova-brains-ui.test.cjs tests/nova-native-image.test.cjs tests/nova-tool-registry.test.cjs
 
+      - name: Set monotonically increasing stable version
+        shell: bash
+        run: echo "NOVA_STABLE_VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
       - name: Kotlin tests and permanently signed stable APK
         working-directory: android
         env:
@@ -98,7 +102,6 @@ jobs:
           NOVA_STABLE_STORE_PASSWORD: ${{ secrets.NOVA_SIGNING_STORE_PASSWORD }}
           NOVA_STABLE_KEY_ALIAS: ${{ secrets.NOVA_SIGNING_KEY_ALIAS }}
           NOVA_STABLE_KEY_PASSWORD: ${{ secrets.NOVA_SIGNING_KEY_PASSWORD }}
-          NOVA_STABLE_VERSION_CODE: ${{ 100000 + github.run_number }}
         run: |
           bash gradlew testDebugUnitTest assembleRelease --no-daemon
 
@@ -109,8 +112,11 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$BUILD_TOOLS/apksigner"
+          test -x "$BUILD_TOOLS/aapt"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
           mkdir -p release
           cp "$APK" release/NOVA-Stable.apk
           sha256sum release/NOVA-Stable.apk > release/SHA256SUMS.txt
