@@ -149,8 +149,8 @@ let awaitingImageDescription=false;
 let imageBusy=false;
 let imageLastResult=null;
 let imagePromptDraft='';
-const imageCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\s+(?:мне\s+)?((?:(?:[а-яіїєґ-]+\s+){0,3})?)(?:картинку|изображение|фото|фотографию|кадр|картинку|малюнок|зображення)(?:\s*[:.,–-]?\s*|$)/iu;
-const drawCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:нарисуй|намалюй)\s+(.+)$/iu;
+const imageCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:(?:возьми|візьми)\s+и\s+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\s+(?:мне\s+)?((?:(?:[а-яіїєґ-]+\s+){0,3})?)(?:картинку|изображение|фото|фотографию|кадр|малюнок|зображення)(?:\s*[:.,–-]?\s*|$)/iu;
+const drawCommand=/^\s*(?:(?:нова|nova)\s*[,:]?\s+)?(?:(?:возьми|візьми)\s+и\s+)?(?:нарисуй|намалюй)\s+(.+)$/iu;
 
 function imageRequest(text){
  const explicit=text.match(imageCommand);
@@ -163,7 +163,19 @@ function imageRequest(text){
  return draw?draw[1].trim():null;
 }
 
-async function executeImageGeneration(prompt,onProgress=()=>{},size=256){
+function imageNegativePrompt(prompt){
+ const artistic=/(?:anime|аниме|мульт|cartoon|illustration|drawing|ілюстрац)/iu.test(prompt);
+ return (artistic?'low quality, ugly, duplicate, incorrect proportions':
+  'low quality, artificial skin, bad anatomy, deformed face, extra limbs')+
+  ', color banding, posterization, neon colors, extreme saturation, distorted, blurry, text, watermark';
+}
+function imageEnhancedPrompt(raw){
+ const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац)/iu.test(raw);
+ const detailed=/(?:photorealistic|realistic photography|cinematic lighting|detailed photo|35mm film|high detail)/iu.test(raw);
+ if(anime||detailed)return raw.trim();
+ return raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures';
+}
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -176,6 +188,17 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=256){
    const state=await bridge.status();
    if(!state.ready)throw new Error(state.detail||'Графическая модель не установлена в NOVA');
    if(!brain)throw new Error('Менеджер моделей NOVA недоступен.');
+   // Optional fully offline visual scene planning while the text brain is loaded.
+   // It never claims a finished image and falls back to the owner's wording.
+   let visualPrompt=prompt;
+   try{
+    if(brain.planImagePrompt){
+     onProgress('🎬 NOVA подготавливает описание сцены...');
+     const plan=await brain.planImagePrompt({prompt:prompt.slice(0,500)});
+     if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
+    }
+   }catch(e){console.warn('NOVA prompt planner: original description used',e);}
+   visualPrompt=imageEnhancedPrompt(visualPrompt);
    onProgress('🧠 Освобождаю память для рисования...');
    await brain.releaseForImage();
    imageReserved=true;
@@ -183,7 +206,10 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=256){
      const total=e.total||20;
      onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов. Работа офлайн.');
    });
-   const result=await bridge.generate({prompt,negative:'deformed face, distorted, blurry, poor anatomy, text, watermark',size,steps:size===256?12:20});
+   const result=await bridge.generate({
+     prompt:visualPrompt,negative:imageNegativePrompt(visualPrompt),
+     size,steps:size===256?16:24
+   });
    imageLastResult=result;
    imagePromptDraft=prompt;
    return result;
@@ -218,10 +244,12 @@ async function handleImageMessage(text,requestedPrompt){
  }
  awaitingImageDescription=false;
  try{
+   const quick=/(?:быстро|черновик|quick|draft|швидко|256)/iu.test(prompt);
+   const size=quick?256:512;
    const result=await executeImageGeneration(prompt,status=>{
      waiting.text=status;
      if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
-   });
+   },size);
    waiting.text='✅ NOVA создала изображение '+result.width+'×'+result.height+' в самой NOVA. Сохранено в Галерею → Pictures/NOVA.';
    waiting.preview=result.preview;
  }catch(error){
@@ -283,6 +311,18 @@ async function send(){
   }
   await handleImageMessage(text,imagePrompt===null?text:imagePrompt);
   return;
+ }
+
+ // Never let Gemma invent where a completed image lives.
+ if(/^(?:где\s*(?:она|картинка|изображение)?\??|де\s*(?:вона|картинка|зображення)?\??|покажи\s*(?:е[её]|картинку|результат)\??)$/iu.test(text) &&
+    history.slice(-8).some(m=>m.who==='user' &&
+     /(?:картин|изображени|рисов|нарис|малюн|зображенн)/iu.test(m.text||''))){
+   history.push({who:'user',text});
+   history.push({who:'nova',text:imageLastResult?.saved?
+    'Вот результат — он сохранён в Галерее → Pictures/NOVA.':
+    'Нет подтверждённого результата последней генерации. Проверь Галерею → Pictures/NOVA или повтори «Нарисуй…».',
+    preview:imageLastResult?.saved?imageLastResult.preview:undefined});
+   input.value='';saveHistory();showChat();return;
  }
 
  // NOVA, not Gemma, knows which native tools are installed and operational.
