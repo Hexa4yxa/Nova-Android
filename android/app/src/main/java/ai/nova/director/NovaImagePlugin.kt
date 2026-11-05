@@ -208,7 +208,7 @@ class NovaImagePlugin : Plugin() {
                     }
                 }
                 validate(partial!!, ext)
-                check(partial!!.renameTo(output)) { "Не удалось завершить импорт" }
+                check(partial!!.renameTo(requireNotNull(output))) { "Не удалось завершить импорт" }
                 prefs.edit().putString("name_$id", filename.take(120))
                     .putString("selected_id", id).apply()
                 call.resolve(JSObject().apply {
