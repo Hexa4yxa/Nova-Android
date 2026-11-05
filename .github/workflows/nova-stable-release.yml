@@ -89,7 +89,7 @@ jobs:
 
       - name: Verify NOVA offline tools contracts
         run: |
-          node --test tests/council-ui.test.cjs tests/nova-tools-ui.test.cjs tests/nova-image-ui.test.cjs tests/nova-brains-ui.test.cjs tests/nova-native-image.test.cjs tests/nova-tool-registry.test.cjs
+          node --test tests/council-ui.test.cjs tests/nova-tools-ui.test.cjs tests/nova-image-ui.test.cjs tests/nova-brains-ui.test.cjs tests/nova-native-image.test.cjs tests/nova-tool-registry.test.cjs tests/nova-model-recovery.test.cjs
 
       - name: Set monotonically increasing stable version
         shell: bash
