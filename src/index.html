@@ -24,7 +24,11 @@ main{flex:1;overflow:auto;padding:18px}
 input{flex:1;min-width:0;border:1px solid #39435e;background:#20283b;color:white;border-radius:22px;padding:14px;font-size:15px}
 button{border:0;background:#6d70f5;color:white;border-radius:16px;padding:0 18px;font-size:18px}
 nav{display:flex;justify-content:space-around;padding:14px 0 6px;color:#b8c1dc;font-size:13px}
-nav span{cursor:pointer;padding:5px}
+nav span{cursor:pointer;padding:5px 1px;white-space:nowrap}
+nav{font-size:11px;gap:4px}
+.brain-row{padding:12px;margin:8px 0;border-radius:11px;background:#141c2d}
+.brain-row button{margin-top:7px;padding:9px 12px;font-size:13px}
+.brain-caption{font-size:12px;color:#a7b1cc;overflow-wrap:anywhere}
 nav .active{color:#999bff;font-weight:bold}
 .panel{background:#20283b;border-radius:15px;padding:18px;margin-bottom:12px}
 .small{color:#a7b1cc;font-size:13px}
@@ -60,7 +64,8 @@ button:disabled{opacity:.45}
 <span class="active" data-tab="chat">💬 Чат</span>
 <span data-tab="council">🎬 Совет</span>
 <span data-tab="projects">📁 Проекты</span>
-<span data-tab="tools">🧠 Инструменты</span>
+<span data-tab="brains">🧠 Мозги</span>
+<span data-tab="tools">🧰 Руки</span>
 </nav>
 <div class="compose" id="compose">
 <input id="message" placeholder="Напиши задачу NOVA...">
@@ -309,6 +314,7 @@ document.querySelectorAll('nav span').forEach(tab=>{
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
   if(selected==='council')return showCouncil();
+   if(selected==='brains')return showBrainManager();
    if(selected==='tools')return showNovaTools();
   content.replaceChildren();
   const panel=document.createElement('div');
@@ -344,6 +350,115 @@ document.querySelectorAll('nav span').forEach(tab=>{
 showChat();
 
 
+
+
+async function showBrainManager(){
+ content.replaceChildren();
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ const image=window.Capacitor?.Plugins?.NovaImage;
+ const add=(parent,tag,cls,text)=>{
+  const el=document.createElement(tag);
+  if(cls)el.className=cls;
+  if(text!==undefined)el.textContent=text;
+  parent.appendChild(el);
+  return el;
+ };
+ const llm=add(content,'section','panel');
+ add(llm,'div','council-heading','🧠 Мозги NOVA · Автоматический выбор');
+ add(llm,'p','tool-warning','Для разговора и режиссёрского совета NOVA использует выбранную GGUF. Для изображения — установленный Local Dream. Все расчёты на телефоне. Новую модель нужно выбрать один раз.');
+ const llmState=add(llm,'p','small','Проверяю текстовые модели...');
+ const modelsBox=add(llm,'div','');
+ const importBtn=add(llm,'button','council-button','📥 Добавить GGUF с телефона');
+ const imagePanel=add(content,'section','panel');
+ add(imagePanel,'div','council-heading','🎨 Мозг картинок · Local Dream');
+ const imageState=add(imagePanel,'p','small','Ищу установленные модели изображений...');
+ const imagesBox=add(imagePanel,'div','');
+ const openDream=add(imagePanel,'button','council-button','📱 Открыть Local Dream');
+ const refresh=add(imagePanel,'button','council-button','↻ Проверить мозги');
+ const extras=add(content,'section','panel');
+ add(extras,'div','council-heading','🔭 Следующие способности');
+ add(extras,'p','small','Зрение, локальный голос и видеодвижок появятся здесь, когда будут подключены и проверены. Пока это не работающие модули.');
+
+ async function refreshLLM(){
+  modelsBox.replaceChildren();
+  if(!brain){llmState.textContent='Android-мост NovaBrain отсутствует.';importBtn.disabled=true;return;}
+  try{
+   const data=await brain.listModels();
+   llmState.textContent=data.loading?'🟡 Загрузка модели...':
+      data.ready?'✅ Текстовый мозг готов: '+data.engine:
+      'ℹ Модель в ожидании. NOVA загрузит выбранную GGUF перед разговором.';
+   const models=Array.isArray(data.models)?data.models:[];
+   if(!models.length){
+    add(modelsBox,'p','brain-caption','GGUF пока нет в этой установке NOVA. Нажми «Добавить GGUF» один раз.');
+   }
+   for(const item of models){
+    const row=add(modelsBox,'div','brain-row');
+    add(row,'div','', (item.active?'✅ ':'')+(item.selected?'● ':'')+(item.name||'GGUF'));
+    add(row,'div','brain-caption', (Number(item.bytes)/1048576).toFixed(0)+' МБ · '+(item.active?'активна':item.selected?'выбрана для автозапуска':'доступна'));
+    if(!item.active){
+     const select=add(row,'button','','🧠 Подключить');
+     select.disabled=data.loading;
+     select.onclick=async()=>{
+      select.disabled=true;
+      llmState.textContent='Загружаю GGUF. Другие модели будут выгружены из памяти.';
+      try{await brain.activateSavedModel({id:item.id});await refreshLLM();}
+      catch(e){llmState.textContent='⚠ '+(e?.message||String(e));select.disabled=false;}
+     };
+    }
+   }
+  }catch(e){llmState.textContent='⚠ '+(e?.message||String(e));}
+ }
+ async function refreshImages(){
+  imagesBox.replaceChildren();
+  if(!image){imageState.textContent='Модуль NovaImage отсутствует.';openDream.disabled=true;return;}
+  try{
+   const result=await image.imageModels();
+   if(result.managed){
+    imageState.textContent='✅ Local Dream: режим управления доступен. NOVA может автоматически выбирать уже скачанные модели.';
+    const models=Array.isArray(result.models)?result.models:[];
+    if(!models.length)add(imagesBox,'p','brain-caption','В Local Dream ещё нет скачанных моделей.');
+    for(const item of models){
+     const row=add(imagesBox,'div','brain-row');
+     const active=result.activeId===item.id && result.state==='running';
+     add(row,'div','',(active?'✅ ':'')+(item.selected?'● ':'')+item.name);
+     add(row,'div','brain-caption',active?'Активна':item.selected?'Выбрана для генерации':'Доступна');
+     if(!active){
+      const select=add(row,'button','',item.selected?'↻ Запустить выбранную':'🎨 Выбрать');
+      select.disabled=result.generating;
+      select.onclick=async()=>{
+       select.disabled=true;
+       imageState.textContent='Подключаю '+item.name+'...';
+       try{
+        await image.selectImageModel({id:item.id});
+        imageState.textContent='Модель выбрана. Local Dream загружает её. При запросе изображения NOVA дождётся готовности.';
+        await refreshImages();
+       }catch(e){imageState.textContent='⚠ '+(e?.message||String(e));select.disabled=false;}
+      };
+     }
+    }
+   } else {
+    const state=await image.status();
+    imageState.textContent=(state.ready?'✅ Генератор готов к работе. ':'⚠ Генератор не активен. ')+
+      'В этой версии Local Dream выбор модели вручную. Для автопереключения нужен поддерживаемый режим управления.';
+    add(imagesBox,'p','brain-caption',state.ready?'Можно идти во вкладку «Руки» или написать «Создай картинку».':
+      'Открой Local Dream и запусти Absolute Reality (CPU), затем вернись. NOVA проверит подключение автоматически.');
+   }
+  }catch(e){imageState.textContent='⚠ '+(e?.message||String(e));}
+ }
+ importBtn.onclick=async()=>{
+  importBtn.disabled=true;
+  llmState.textContent='Выбери GGUF на телефоне. Файл будет импортирован в память этой NOVA.';
+  try{await brain.importAdditionalModel();await refreshLLM();}
+  catch(e){llmState.textContent='⚠ '+(e?.message||String(e));}
+  finally{importBtn.disabled=false;}
+ };
+ openDream.onclick=async()=>{
+  try{await image.openLocalDream();imageState.textContent='Выбери установленную модель; затем вернись в NOVA.';}
+  catch(e){imageState.textContent='⚠ '+(e?.message||String(e));}
+ };
+ refresh.onclick=async()=>{await Promise.all([refreshLLM(),refreshImages()]);};
+ await Promise.all([refreshLLM(),refreshImages()]);
+}
 
 // Explicit-approval resource tools. No LLM text is ever executed as commands.
 function renderNovaImageStudio(initialPrompt=''){
