@@ -17,7 +17,8 @@ test('NOVA can restore a user-owned model from SAF without root or network',()=>
  assert.match(backup,/Intent\.FLAG_GRANT_READ_URI_PERMISSION/);
  assert.match(backup,/@ActivityCallback/);
  assert.match(backup,/openInputStream\(uri\)/);
- assert.doesNotMatch(backup,/MANAGE_EXTERNAL_STORAGE|HttpURLConnection|https?:\/\//);
+ assert.doesNotMatch(backup,/HttpURLConnection|https?:\/\//);
+ assert.doesNotMatch(read('android/app/src/main/AndroidManifest.xml'),/android.permission.MANAGE_EXTERNAL_STORAGE/);
  assert.match(backup,/context\.contentResolver\.query/);
  assert.match(backup,/NovaRecommendedImageModel\.FILENAME/);
  assert.match(app,/registerPlugin\(NovaModelBackupPlugin\.class\)/);
