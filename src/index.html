@@ -59,7 +59,7 @@ button:disabled{opacity:.45}
 <div class="app">
 <header>
 <div class="brand">✦ NOVA · DIRECTOR LAB</div>
-<div class="subtitle">Gemma офлайн · режиссёрский совет и Critic (тест)</div>
+<div class="subtitle">Локальные мозги · режиссёрский совет · инструменты</div>
 </header>
 <main id="content"></main>
 <div class="bottom">
@@ -451,6 +451,7 @@ async function showBrainManager(){
     let detail='';
     if(state==='installed')detail='✅ Скачана, SHA-256 проверена, готова для использования внутри NOVA.';
     else if(state==='verifying')detail='🔎 Проверяю целостность и SHA-256 скачанной модели...';
+    else if(state==='failed')detail='⚠ Android не завершил скачивание (код '+(installed.reason||'сети/хранилища')+'). Проверь Wi-Fi и свободное место, затем попробуй снова.';
     else if(state==='pending'||state==='downloading'||state==='paused'){
      const pct=total>0?Math.min(100,Math.floor(received/total*100)):0;
      detail=(state==='paused'?'⏸ Загрузка приостановлена системой. ':'⬇️ Скачивание: ')+
