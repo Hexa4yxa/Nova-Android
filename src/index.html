@@ -423,6 +423,7 @@ async function showBrainManager(){
  const brain=window.Capacitor?.Plugins?.NovaBrain;
  const image=window.Capacitor?.Plugins?.NovaImage;
  const downloads=window.Capacitor?.Plugins?.NovaImageModels;
+ const backup=window.Capacitor?.Plugins?.NovaModelBackup;
  const add=(parent,tag,cls,text)=>{
   const el=document.createElement(tag);
   if(cls)el.className=cls;
@@ -444,6 +445,10 @@ async function showBrainManager(){
  const imageTestPreview=add(imagePanel,'div','');
  const downloadsBox=add(imagePanel,'div','');
  const openDream=add(imagePanel,'button','council-button','📂 Импортировать модель с телефона');
+ const restoreBackup=add(imagePanel,'button','council-button','♻️ Восстановить SD 1.5 из NOVA-Models');
+ const restoreStatus=add(imagePanel,'p','brain-caption','Резервная копия: Загрузки → NOVA-Models. NOVA никогда не удаляет исходный файл.');
+ restoreBackup.disabled=!backup;
+ if(!backup)restoreStatus.textContent='В этой APK ещё нет восстановления из резервной копии.';
  const refresh=add(imagePanel,'button','council-button','↻ Проверить мозги');
  const extras=add(content,'section','panel');
  add(extras,'div','council-heading','🔭 Следующие способности');
@@ -618,6 +623,30 @@ async function showBrainManager(){
   try{await image.importImageModel();imageState.textContent='Модель импортирована в NOVA.';await refreshImages();}
   catch(e){imageState.textContent='⚠ '+(e?.message||String(e));}
  };
+ if(backup){
+  restoreBackup.onclick=async()=>{
+   restoreBackup.disabled=true;
+   restoreStatus.textContent='Выбери v1-5-pruned-emaonly-fp16.safetensors в Загрузки → NOVA-Models. Проверю SHA-256 и восстановлю офлайн.';
+   let listener=null;
+   try{
+    listener=await backup.addListener('novaModelRestoreProgress',event=>{
+     const done=Number(event.copied||0)/1048576;
+     const total=Number(event.total||0)/1048576;
+     restoreStatus.textContent='♻️ Восстановление: '+done.toFixed(0)+' / '+total.toFixed(0)+' МиБ. Не закрывай приложение.';
+    });
+    const data=await backup.restoreRecommended();
+    restoreStatus.textContent=data.verified?
+     '✅ Резервная копия проверена по SHA-256. Графический мозг подключён. Исходный файл сохранён.':
+     '⚠ Восстановление не подтвердило целостность файла.';
+    await refreshImages();
+   }catch(error){
+    restoreStatus.textContent='⚠ '+(error?.message||String(error))+' Резервная копия остаётся в Загрузках.';
+   }finally{
+    try{await listener?.remove();}catch(_){}
+    restoreBackup.disabled=false;
+   }
+  };
+ }
  refresh.onclick=async()=>{await Promise.all([refreshLLM(),refreshImages()]);};
  await Promise.all([refreshLLM(),refreshImages()]);
  // Refresh the download progress only while this tab is open.
