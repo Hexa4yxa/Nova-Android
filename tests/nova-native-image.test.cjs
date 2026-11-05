@@ -15,7 +15,7 @@ test('NOVA single-app UI is syntactically valid and has no required external ima
  assert.ok(js);
  assert.doesNotThrow(()=>new vm.Script(js));
  assert.match(js,/image\.importImageModel\(/);
- assert.match(js,/downloads\.downloadRecommended\(\{approved:true\}\)/);
+ assert.match(js,/downloads\.downloadRecommended\(\{approved:true,allowMeteredWifi:/);
  assert.match(js,/brain\.releaseForImage\(\)/);
  assert.match(js,/bridge\.generate\(/);
  assert.match(js,/\uD83E\uDDEA Проверить PNG/);
