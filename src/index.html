@@ -532,6 +532,9 @@ async function novaPrepareOnce() {
 }
 
 async function novaAutoPrepare() {
+  // Tools Lab must be usable without duplicating the user's large GGUF.
+  // Chat and Council already call novaPrepareOnce() on demand.
+  if (window.Capacitor?.Plugins?.NovaTools) return;
   const brain = window.Capacitor?.Plugins?.NovaBrain;
   if (!brain) {
     console.warn('NOVA: Android-мост недоступен');
