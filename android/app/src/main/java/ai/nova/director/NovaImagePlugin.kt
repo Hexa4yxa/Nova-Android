@@ -179,14 +179,7 @@ class NovaImagePlugin : Plugin() {
                 val rgb = Base64.decode(result.getString("image"), Base64.DEFAULT)
                 check(rgb.size == width * height * 3) { "Неполные данные изображения" }
 
-                val pixels = IntArray(width * height)
-                for (i in pixels.indices) {
-                    val j = i * 3
-                    pixels[i] = (0xff shl 24) or
-                        ((rgb[j].toInt() and 255) shl 16) or
-                        ((rgb[j + 1].toInt() and 255) shl 8) or
-                        (rgb[j + 2].toInt() and 255)
-                }
+                val pixels = NovaImagePixels.toArgb(rgb, width, height)
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 try {
                     bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
