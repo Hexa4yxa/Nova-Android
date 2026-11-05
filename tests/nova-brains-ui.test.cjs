@@ -17,7 +17,8 @@ test('brain manager connects to native APIs, not model-generated shell commands'
  assert.match(code,/brain\.importAdditionalModel\(/);
  assert.match(code,/image\.imageModels\(\)/);
  assert.match(code,/image\.selectImageModel\(/);
- assert.match(code,/image\.openLocalDream\(\)/);
+ assert.match(code,/image\.importImageModel\(\)/);
+ assert.match(code,/brain\.releaseForImage\(\)/);
  assert.doesNotMatch(code,/innerHTML\s*=/);
  assert.doesNotMatch(code,/\beval\s*\(/);
 });
