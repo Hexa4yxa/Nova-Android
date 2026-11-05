@@ -45,19 +45,25 @@ class NovaImagePlugin : Plugin() {
     }
 
     private fun find(id: String): File? {
+        if (id == NovaRecommendedImageModel.ID) return NovaRecommendedImageModel.installed(context)
         if (!Regex("^[a-f0-9-]{36}$").matches(id)) return null
         return listOf("safetensors", "gguf")
             .map { File(dir(), "$id.$it") }
             .firstOrNull { it.isFile }
     }
 
-    private fun installed(): List<Pair<String, File>> =
-        dir().listFiles()?.filter {
+    private fun installed(): List<Pair<String, File>> {
+        val custom = dir().listFiles()?.filter {
             it.isFile && it.extension in listOf("gguf", "safetensors")
         }?.mapNotNull { file ->
             val id = file.name.substringBeforeLast('.')
             if (find(id) == file) id to file else null
         }?.sortedBy { it.first } ?: emptyList()
+        val curated = NovaRecommendedImageModel.installed(context)?.let {
+            listOf(NovaRecommendedImageModel.ID to it)
+        } ?: emptyList()
+        return curated + custom
+    }
 
     private fun selected(): String? {
         val saved = prefs.getString("selected_id", null)
@@ -113,11 +119,13 @@ class NovaImagePlugin : Plugin() {
             for ((key, file) in installed()) {
                 items.put(JSObject().apply {
                     put("id", key)
-                    put("name", prefs.getString("name_$key", file.name))
+                    put("name", if (key == NovaRecommendedImageModel.ID)
+                        NovaRecommendedImageModel.NAME
+                        else prefs.getString("name_$key", file.name))
                     put("bytes", file.length())
                     put("selected", id == key)
                     put("cpu", true)
-                    put("validated", false)
+                    put("validated", key == NovaRecommendedImageModel.ID)
                 })
             }
             call.resolve(JSObject().apply {
@@ -233,11 +241,6 @@ class NovaImagePlugin : Plugin() {
                 importing.set(false)
             }
         }
-    }
-
-    @PluginMethod
-    fun openLocalDream(call: PluginCall) {
-        call.reject("Local Dream больше не нужен. Импортируй графическую модель прямо в NOVA.")
     }
 
     @PluginMethod
