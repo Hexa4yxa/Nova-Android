@@ -116,6 +116,31 @@ class NovaBrainPlugin : Plugin() {
         }
     }
 
+    /**
+     * Free the text GGUF before heavy CPU image generation.
+     * Selected model stays on disk and is reloaded by prepare() on the next chat.
+     */
+    @PluginMethod
+    fun releaseForImage(call: PluginCall) {
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            call.reject("Сначала заверши разговор или режиссёрский совет")
+            return
+        }
+        scope.launch {
+            try {
+                if (brain.state() == "ModelReady" || brain.state() == "Error") {
+                    brain.unloadModel()
+                }
+                activeModelId = ""
+                call.resolve(JSObject().apply { put("released", true) })
+            } catch (e: Exception) {
+                call.reject("Не удалось освободить память: " + e.message, e)
+            } finally {
+                modelLoading.set(false)
+            }
+        }
+    }
+
     @PluginMethod
     fun listModels(call: PluginCall) {
         try {
