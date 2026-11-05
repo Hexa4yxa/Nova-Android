@@ -479,6 +479,65 @@ class NovaBrainPlugin : Plugin() {
         }
     }
 
+    /**
+     * Optional offline prompt planner: translate a user-described image to
+     * precise English SD1.5 text before releasing the loaded Gemma model.
+     * It does not generate or claim a picture; native NovaImage does that.
+     */
+    @PluginMethod
+    fun planImagePrompt(call: PluginCall) {
+        val raw = call.getString("prompt")?.trim().orEmpty()
+        if (raw.length !in 3..500) {
+            call.reject("Опиши изображение (3–500 символов)")
+            return
+        }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас создаёт изображение")
+            return
+        }
+        if (generating.get() || modelLoading.get() ||
+            brain.state() != "ModelReady" ||
+            !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.resolve(JSObject().apply {
+                put("prompt", raw)
+                put("optimized", false)
+            })
+            return
+        }
+        scope.launch {
+            try {
+                val instruction = """
+                    Convert this visual description to ONE English prompt for
+                    a photorealistic Stable Diffusion image.
+                    Preserve the requested subject, clothing, setting and action.
+                    Do not change nationality or add unrequested symbols.
+                    Use concise photographic detail, realistic natural colors,
+                    accurate anatomy and cinematic lighting.
+                    Output ONE English line only; no commentary, no markdown.
+                    Description: ${raw.take(500)}
+                    English prompt:
+                """.trimIndent()
+                val answer = brain.chat(instruction, 160) { _ -> }
+                    .trim().trim('"', '\'', '\n')
+                    .lineSequence().firstOrNull()?.trim().orEmpty()
+                    .removePrefix("English prompt:").trim()
+                val latin = answer.count { it in 'a'..'z' || it in 'A'..'Z' }
+                val safe = answer.length in 20..540 && latin >= 20 &&
+                    !answer.contains("markdown") && !answer.startsWith("I ")
+                call.resolve(JSObject().apply {
+                    put("prompt", if (safe) answer.take(540) else raw)
+                    put("optimized", safe)
+                })
+            } catch (_: Exception) {
+                call.resolve(JSObject().apply { put("prompt", raw); put("optimized", false) })
+            } finally {
+                generating.set(false)
+                NovaComputeGate.leaveText()
+            }
+        }
+    }
+
     @PluginMethod
     fun chat(call: PluginCall) {
         val message = call.getString("message")
