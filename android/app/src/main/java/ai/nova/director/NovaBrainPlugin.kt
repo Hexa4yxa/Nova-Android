@@ -126,19 +126,37 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Сначала заверши разговор или режиссёрский совет")
             return
         }
+        if (!NovaComputeGate.reserveImage()) {
+            modelLoading.set(false)
+            call.reject("NOVA уже выполняет другую задачу. Дождись завершения.")
+            return
+        }
         scope.launch {
+            var released = false
             try {
                 if (brain.state() == "ModelReady" || brain.state() == "Error") {
                     brain.unloadModel()
                 }
                 activeModelId = ""
+                released = true
                 call.resolve(JSObject().apply { put("released", true) })
             } catch (e: Exception) {
                 call.reject("Не удалось освободить память: " + e.message, e)
             } finally {
+                if (!released) NovaComputeGate.releaseUnusedImage()
                 modelLoading.set(false)
             }
         }
+    }
+
+    /**
+     * Release reservation if the web UI fails before starting native inference.
+     * Never unlock memory while a native image job is still running.
+     */
+    @PluginMethod
+    fun finishImageWork(call: PluginCall) {
+        val released = NovaComputeGate.releaseUnusedImage()
+        call.resolve(JSObject().apply { put("released", released) })
     }
 
     @PluginMethod
@@ -185,7 +203,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Эта GGUF пока не импортирована в NOVA")
             return
         }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA рисует изображение. Текстовая модель подождёт.")
+            return
+        }
         if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("Сначала заверши текущую задачу NOVA")
             return
         }
@@ -201,6 +224,7 @@ class NovaBrainPlugin : Plugin() {
                 call.reject("Не удалось подключить модель: " + e.message, e)
             } finally {
                 modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -274,35 +298,48 @@ class NovaBrainPlugin : Plugin() {
 
     @PluginMethod
     fun prepare(call: PluginCall) {
-        if (brain.state() == "ModelReady") {
-            call.resolve(JSObject().apply {
-                put("loaded", true)
-                put("model", brain.modelInfo())
-            })
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Сначала дождись окончания генерации картинки")
             return
         }
-        val id = selectedModelId()
-        if (id == null) {
-            // No model imported: Android file picker requires one explicit action.
-            importModel(call)
-            return
-        }
-        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
-            call.reject("NOVA уже загружает модель или выполняет задачу")
-            return
-        }
-        scope.launch {
-            try {
-                activateModel(id)
+        try {
+            if (brain.state() == "ModelReady") {
                 call.resolve(JSObject().apply {
                     put("loaded", true)
                     put("model", brain.modelInfo())
                 })
-            } catch (e: Exception) {
-                call.reject("Ошибка запуска модели: " + e.message, e)
-            } finally {
-                modelLoading.set(false)
+                NovaComputeGate.leaveText()
+                return
             }
+            val id = selectedModelId()
+            if (id == null) {
+                NovaComputeGate.leaveText()
+                // First model import still requires the owner to choose a GGUF.
+                importModel(call)
+                return
+            }
+            if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+                NovaComputeGate.leaveText()
+                call.reject("NOVA уже загружает модель или выполняет задачу")
+                return
+            }
+            scope.launch {
+                try {
+                    activateModel(id)
+                    call.resolve(JSObject().apply {
+                        put("loaded", true)
+                        put("model", brain.modelInfo())
+                    })
+                } catch (e: Exception) {
+                    call.reject("Ошибка запуска модели: " + e.message, e)
+                } finally {
+                    modelLoading.set(false)
+                    NovaComputeGate.leaveText()
+                }
+            }
+        } catch (e: Exception) {
+            NovaComputeGate.leaveText()
+            call.reject("Не удалось подготовить текстовую модель: " + e.message, e)
         }
     }
 
@@ -402,7 +439,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Message required")
             return
         }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас генерирует изображение. Дождись завершения.")
+            return
+        }
         if (modelLoading.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("NOVA is already generating a reply")
             return
         }
@@ -424,6 +466,7 @@ class NovaBrainPlugin : Plugin() {
                 call.reject("NOVA chat failed: " + (e.message ?: e.javaClass.simpleName), e)
             } finally {
                 generating.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -440,7 +483,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Задача должна содержать от 1 до 1200 символов")
             return
         }
-        if (!generating.compareAndSet(false, true)) {
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас рисует изображение. Совет подождёт.")
+            return
+        }
+        if (modelLoading.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("NOVA уже выполняет другую задачу")
             return
         }
@@ -502,6 +550,7 @@ class NovaBrainPlugin : Plugin() {
             } finally {
                 councilPhase = ""
                 generating.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
