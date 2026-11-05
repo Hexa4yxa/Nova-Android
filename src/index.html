@@ -180,12 +180,22 @@ async function handleImageMessage(text,requestedPrompt){
  const waiting={who:'nova',text:'🎨 NOVA готовит изображение...'};
  history.push(waiting);
  showChat();
+ const imageStop=document.getElementById('stop');
+ imageStop.style.display='inline-block';
+ imageStop.disabled=false;
+ imageStop.onclick=async()=>{
+  imageStop.disabled=true;
+  waiting.text='■ Отправляю команду остановки...';
+  try{await window.Capacitor?.Plugins?.NovaImage?.cancel();}catch(e){waiting.text='Ошибка остановки: '+e.message;}
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+ };
  const prompt=requestedPrompt.trim();
  if(!prompt){
    awaitingImageDescription=true;
    waiting.text='Опиши, что нарисовать. Например: «тёмный лес в тумане, без людей». Локальный генератор Local Dream должен быть открыт.';
    busy=false;
    document.getElementById('send').disabled=false;
+   imageStop.style.display='none';imageStop.onclick=null;
    showChat();
    saveHistory();
    return;
@@ -203,6 +213,7 @@ async function handleImageMessage(text,requestedPrompt){
  }finally{
    busy=false;
    document.getElementById('send').disabled=false;
+   imageStop.style.display='none';imageStop.onclick=null;
    saveHistory();
    if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
  }
@@ -356,6 +367,22 @@ function renderNovaImageStudio(initialPrompt=''){
  const prompt=node(panel,'textarea','nova-image-input');
  prompt.placeholder='Опиши изображение. Для SD 1.5 лучше описание на английском.';
  prompt.value=initialPrompt||imagePromptDraft||'cinematic horror movie still, abandoned bathroom, eerie mirror, blue moonlight, dramatic shadows, realistic 35mm film';
+ const presets=[
+  ['👻 Мистика','cinematic horror film still, an old mirror in a dark abandoned bathroom, cold blue moonlight, ominous shadows, no people, photorealistic 35mm film'],
+  ['🌫 Туманный лес','cinematic foggy forest at night, mysterious path, moonlight through tall trees, realistic photography, ominous atmosphere, no people'],
+  ['🎬 Кадр без лица','cinematic film still, solitary person viewed from behind in front of a strange mirror, face completely hidden, realistic dramatic lighting, atmospheric suspense'],
+  ['🌸 Аниме','beautiful original anime character standing in a moonlit enchanted forest, expressive eyes, detailed anime illustration, cinematic composition']
+ ];
+ const presetRow=node(panel,'div','tool-actions');
+ for(const [label,text] of presets){
+  const btn=node(presetRow,'button','',label);
+  btn.onclick=()=>{
+   prompt.value=text;
+   imagePromptDraft=text;
+   prompt.focus();
+  };
+ }
+
  const controls=node(panel,'div','tool-actions');
  const check=node(controls,'button','','🔎 Проверить');
  const generate=node(controls,'button','','🎨 Создать 512×512');
