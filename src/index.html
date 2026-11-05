@@ -481,6 +481,11 @@ async function showBrainManager(){
       pct+'% ('+(received/1048576).toFixed(0)+' / '+(total/1048576).toFixed(0)+' МБ).';
     }else detail='С официального каталога Comfy-Org (Hugging Face). CreativeML OpenRAIL-M. Только Wi-Fi, после установки — офлайн.';
     add(row,'div','brain-caption',detail);
+    if(state==='paused'){
+     add(row,'div','brain-caption','🔎 '+(installed.pauseExplanation||
+      'Android остановил скачивание. Проверь доступ к Wi-Fi. NOVA не использует мобильные данные для загрузки модели.'));
+     add(row,'div','brain-caption','Не нажимай «Отменить»: при появлении разрешённой сети Android обычно продолжит загрузку автоматически.');
+    }
     if(['pending','downloading','paused'].includes(state)){
      const p=add(row,'progress','nova-download-progress');
      p.max=100;
