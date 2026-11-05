@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads]
 
 jobs:
   build:
@@ -64,13 +64,15 @@ jobs:
         run: npx cap sync android
 
       - name: Check Director Council UI syntax and wiring
-        if: github.ref == 'refs/heads/feature/nova-director-council'
-        run: node --test tests/council-ui.test.cjs
+        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads'
+        run: |
+          node --test tests/council-ui.test.cjs
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ]; then node --test tests/nova-tools-ui.test.cjs; fi
 
       - name: Build APK and run Kotlin unit tests
         working-directory: android
         run: |
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ]; then
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ]; then
             bash gradlew testDebugUnitTest assembleDebug --no-daemon
           else
             bash gradlew assembleDebug --no-daemon
@@ -82,6 +84,18 @@ jobs:
           name: NOVA-AI-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish isolated NOVA Tools test APK
+        if: github.ref == 'refs/heads/feature/nova-tools-approved-downloads'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Tools-Lab.apk
+          gh release create "nova-tools-lab-${{ github.run_number }}" release/NOVA-Tools-Lab.apk \
+            --title "NOVA Tools Lab #${{ github.run_number }}" \
+            --notes "Experimental standalone test build. Explicit confirmation for HTTPS downloads, SHA-256 and export. Does not autonomously install software or replace Director Lab. On-device functionality unverified." \
+            --prerelease --target "${{ github.sha }}"
 
       - name: Publish Director Council test APK
         if: github.ref == 'refs/heads/feature/nova-director-council'

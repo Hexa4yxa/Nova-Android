@@ -32,8 +32,9 @@ android {
             // installation and its saved GGUF remain untouched.
             def gemmaTest = System.getenv('GITHUB_REF') == 'refs/heads/experiment/nova-gemma'
             def councilTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-director-council'
-            applicationIdSuffix councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test"))
-            versionNameSuffix councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test"))
+            def toolsTest = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-tools-approved-downloads'
+            applicationIdSuffix toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")))
+            versionNameSuffix toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))
         }
         release {
             minifyEnabled false
