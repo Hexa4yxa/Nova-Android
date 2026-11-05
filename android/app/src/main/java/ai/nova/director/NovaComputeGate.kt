@@ -1,19 +1,35 @@
 package ai.nova.director
 
 /**
- * One ownership gate shared by text inference and image diffusion.
+ * Atomic ownership of heavyweight offline model memory.
  *
- * The phone cannot safely keep a multi-GB Gemma context and Stable Diffusion
- * resident at the same time. Admission is atomic across both Capacitor plugins,
- * not inferred from JavaScript buttons or from separate plugin busy flags.
+ * Text inference and diffusion may not overlap. An image *reservation* expires
+ * after a short idle interval if its WebView request disappears before JNI runs,
+ * e.g. after page reload. Once native inference has started, it NEVER expires
+ * automatically: only its real completion may free image memory.
  */
 internal object NovaComputeGate {
     private val lock = Any()
     private var textUsers = 0
     private var imageReserved = false
     private var imageRunning = false
+    private var imageReservedAtNs = 0L
+
+    // The small gap between releasing Gemma and starting diffusion should take
+    // seconds. A stale reservation cannot permanently lock the chat.
+    private const val IDLE_RESERVATION_NS = 120_000_000_000L
+
+    private fun expireAbandonedLocked() {
+        if (imageReserved && !imageRunning &&
+            imageReservedAtNs != 0L &&
+            System.nanoTime() - imageReservedAtNs > IDLE_RESERVATION_NS) {
+            imageReserved = false
+            imageReservedAtNs = 0L
+        }
+    }
 
     fun enterText(): Boolean = synchronized(lock) {
+        expireAbandonedLocked()
         if (imageReserved) false
         else {
             textUsers += 1
@@ -27,16 +43,19 @@ internal object NovaComputeGate {
     }
 
     fun reserveImage(): Boolean = synchronized(lock) {
+        expireAbandonedLocked()
         if (imageReserved || textUsers > 0) false
         else {
             imageReserved = true
+            imageReservedAtNs = System.nanoTime()
             true
         }
     }
 
-    /** This succeeds once, after the caller has reserved image memory. */
+    /** Start only from a live reservation, never while a text task is active. */
     fun beginImage(): Boolean = synchronized(lock) {
-        if (!imageReserved || imageRunning) false
+        expireAbandonedLocked()
+        if (!imageReserved || imageRunning || textUsers > 0) false
         else {
             imageRunning = true
             true
@@ -46,17 +65,26 @@ internal object NovaComputeGate {
     fun finishImage() = synchronized(lock) {
         imageRunning = false
         imageReserved = false
+        imageReservedAtNs = 0L
     }
 
-    /** Called on early abort before the native generator starts. */
+    /**
+     * Used only when generation never started; an active native generation
+     * cannot be unlocked by a stale WebView.
+     */
     fun releaseUnusedImage(): Boolean = synchronized(lock) {
         if (imageRunning) false
         else {
             imageReserved = false
+            imageReservedAtNs = 0L
             true
         }
     }
 
-    fun isImageReserved(): Boolean = synchronized(lock) { imageReserved }
+    fun isImageReserved(): Boolean = synchronized(lock) {
+        expireAbandonedLocked()
+        imageReserved
+    }
+
     fun isImageRunning(): Boolean = synchronized(lock) { imageRunning }
 }
