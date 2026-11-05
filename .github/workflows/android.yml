@@ -1,5 +1,10 @@
 name: NOVA Android APK
 
+# Keep only the most recent code revision building on each development branch.
+concurrency:
+  group: nova-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
