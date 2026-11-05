@@ -3,6 +3,8 @@ package ai.nova.director
 import ai.nova.image.NativeImageEngine
 import android.app.Activity
 import android.app.ActivityManager
+import android.content.Context
+import android.os.PowerManager
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
@@ -45,12 +47,21 @@ class NovaImagePlugin : Plugin() {
     private fun lastError(id: String?) =
         if (id != null && prefs.getString("last_error_model_id", null) == id)
             prefs.getString("last_error", null) else null
-    private fun availableMemoryMib(): Long {
-        val service = context.getSystemService(android.content.Context.ACTIVITY_SERVICE)
-            as ActivityManager
-        val memory = ActivityManager.MemoryInfo()
-        service.getMemoryInfo(memory)
-        return memory.availMem / (1024 * 1024)
+    private fun memoryInfo(): ActivityManager.MemoryInfo {
+        val service = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return ActivityManager.MemoryInfo().also { service.getMemoryInfo(it) }
+    }
+
+    private fun availableMemoryMib(): Long = memoryInfo().availMem / (1024 * 1024)
+
+    /** Never assume a model is safe to load just because its file exists. */
+    private fun resourceWarning(size: Int): String? {
+        val memory = memoryInfo()
+        val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val tooHot = power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE
+        return NovaImageSafety.warning(
+            memory.availMem / (1024 * 1024), memory.lowMemory, tooHot, size
+        )
     }
 
     private fun dir() = File(context.filesDir, "visual-models").also {
@@ -118,6 +129,7 @@ class NovaImagePlugin : Plugin() {
                 put("testedOnDevice", verified(model))
                 put("lastError", lastError(model) ?: "")
                 put("freeMemoryMib", availableMemoryMib())
+                put("resourceWarning", resourceWarning(256) ?: "")
                 put("detail", when {
                     error != null -> "Нативная библиотека недоступна: $error"
                     model == null -> "Добавь модель изображений через «Мозги». Нужен совместимый checkpoint SD 1.5; текстовая Gemma GGUF не подходит."
@@ -282,6 +294,19 @@ class NovaImagePlugin : Plugin() {
         }
         if (!NovaComputeGate.beginImage()) {
             call.reject("Сначала нужно освободить память от текстового мозга NOVA")
+            return
+        }
+        // Image admission owns the global compute gate, so a failure here
+        // releases only our own reservation and leaves Gemma untouched.
+        val unsafe = try { resourceWarning(size) }
+        catch (e: Exception) {
+            NovaComputeGate.finishImage()
+            call.reject("Не удалось проверить RAM или нагрев: " + e.message, e)
+            return
+        }
+        if (unsafe != null) {
+            NovaComputeGate.finishImage()
+            call.reject(unsafe)
             return
         }
         if (importing.get() || !generating.compareAndSet(false, true)) {
