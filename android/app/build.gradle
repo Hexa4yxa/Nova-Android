@@ -8,8 +8,8 @@ android {
         applicationId "ai.nova.director"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1').toInteger()
-        versionName "1.0." + (System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1')
+        versionCode = Integer.parseInt(System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1')
+        versionName = "1.0.${System.getenv('NOVA_STABLE_VERSION_CODE') ?: '1'}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
