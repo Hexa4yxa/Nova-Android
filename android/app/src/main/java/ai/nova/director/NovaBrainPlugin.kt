@@ -231,7 +231,12 @@ class NovaBrainPlugin : Plugin() {
 
     @PluginMethod
     fun importAdditionalModel(call: PluginCall) {
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Графический мозг занят. Импорт GGUF начнём после него.")
+            return
+        }
         if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("Сначала заверши текущую задачу")
             return
         }
@@ -243,6 +248,7 @@ class NovaBrainPlugin : Plugin() {
             startActivityForResult(call, intent, "additionalModelSelected")
         } catch (e: Exception) {
             modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Не удалось открыть выбор файла: " + e.message, e)
         }
     }
@@ -252,6 +258,7 @@ class NovaBrainPlugin : Plugin() {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
             modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Выбор модели отменён")
             return
         }
@@ -292,6 +299,7 @@ class NovaBrainPlugin : Plugin() {
             } finally {
                 temp?.delete()
                 modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -302,27 +310,30 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Сначала дождись окончания генерации картинки")
             return
         }
+        var gatePassedToWorker = false
+        var gateReleasedForPicker = false
+        var loaderAcquired = false
         try {
             if (brain.state() == "ModelReady") {
                 call.resolve(JSObject().apply {
                     put("loaded", true)
                     put("model", brain.modelInfo())
                 })
-                NovaComputeGate.leaveText()
                 return
             }
             val id = selectedModelId()
             if (id == null) {
+                // The picker acquires its own admission lock.
                 NovaComputeGate.leaveText()
-                // First model import still requires the owner to choose a GGUF.
+                gateReleasedForPicker = true
                 importModel(call)
                 return
             }
             if (generating.get() || !modelLoading.compareAndSet(false, true)) {
-                NovaComputeGate.leaveText()
                 call.reject("NOVA уже загружает модель или выполняет задачу")
                 return
             }
+            loaderAcquired = true
             scope.launch {
                 try {
                     activateModel(id)
@@ -337,9 +348,14 @@ class NovaBrainPlugin : Plugin() {
                     NovaComputeGate.leaveText()
                 }
             }
+            gatePassedToWorker = true
         } catch (e: Exception) {
-            NovaComputeGate.leaveText()
+            if (loaderAcquired && !gatePassedToWorker) modelLoading.set(false)
             call.reject("Не удалось подготовить текстовую модель: " + e.message, e)
+        } finally {
+            if (!gatePassedToWorker && !gateReleasedForPicker) {
+                NovaComputeGate.leaveText()
+            }
         }
     }
 
@@ -363,17 +379,34 @@ class NovaBrainPlugin : Plugin() {
 
     @PluginMethod
     fun importModel(call: PluginCall) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            type = "*/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA генерирует картинку. Импорт GGUF сейчас недоступен.")
+            return
         }
-        startActivityForResult(call, intent, "modelSelected")
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.reject("NOVA уже загружает модель или выполняет задачу")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(call, intent, "modelSelected")
+        } catch (e: Exception) {
+            modelLoading.set(false)
+            NovaComputeGate.leaveText()
+            call.reject("Не удалось открыть выбор модели: " + e.message, e)
+        }
     }
 
     @ActivityCallback
     private fun modelSelected(call: PluginCall, result: ActivityResult) {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Выбор модели отменён")
             return
         }
@@ -408,6 +441,9 @@ class NovaBrainPlugin : Plugin() {
                 call.resolve(response)
             } catch (e: Exception) {
                 call.reject("Ошибка импорта модели: " + e.toString(), e)
+            } finally {
+                modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -419,7 +455,15 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Model path required")
             return
         }
-
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Дождись завершения генерации изображения.")
+            return
+        }
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.reject("NOVA уже выполняет другую задачу")
+            return
+        }
         scope.launch {
             try {
                 brain.loadModel(path)
@@ -428,6 +472,9 @@ class NovaBrainPlugin : Plugin() {
                 call.resolve(result)
             } catch (e: Exception) {
                 call.reject("Model loading failed", e)
+            } finally {
+                modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
