@@ -468,7 +468,7 @@ async function showBrainManager(){
     if(state==='available'||state==='failed'||state==='not_found'){
      const startDownload=add(row,'button','','⬇️ Скачать 2,13 ГБ');
      startDownload.onclick=async()=>{
-      if(!confirm('Скачать Stable Diffusion 1.5 FP16 (≈2,13 ГБ)? Только Wi-Fi, потребуется около 4,2 ГБ свободного места. Использование — по лицензии CreativeML OpenRAIL-M. Без скачивания NOVA продолжит работать как текстовый ассистент.'))return;
+      // Final permission is requested by the native Android dialog, not a duplicate browser popup.
       startDownload.disabled=true;
       try{await downloads.downloadRecommended({approved:true});await refreshImages();}
       catch(e){imageState.textContent='⚠ '+(e?.message||String(e));startDownload.disabled=false;}
