@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(NovaBrainPlugin.class);
         registerPlugin(NovaToolsPlugin.class);
+        registerPlugin(NovaImagePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
