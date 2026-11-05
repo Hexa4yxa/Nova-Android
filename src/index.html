@@ -274,7 +274,16 @@ async function send(){
  }
 
  // NOVA, not Gemma, knows which native tools are installed and operational.
- const capability=window.NovaToolRegistry?.classifyCapability(text,history);
+ // Capability questions must never be delegated to Gemma's guesses.
+ // A minimal fallback remains available even if the registry script fails.
+ const capability=window.NovaToolRegistry?.classifyCapability(text,history) ||
+  (/(?:картин|изображени|фото|рисова|нарис|малюн|зображенн)/iu.test(text) &&
+   /(?:\?|умеешь|можешь|умеєш|можеш|умеет|умеє|способна)/iu.test(text)
+    ? {kind:'capability',tool:'image'} : null) ||
+  (/(?:инструмент|інструмент|с помощью|за допомогою)/iu.test(text) &&
+   history.slice(-6).some(m=>m.who==='user' &&
+    /(?:картин|изображени|фото|рисова|нарис|малюн|зображенн)/iu.test(m.text||''))
+    ? {kind:'capability',tool:'image'} : null);
  if(capability){
   await handleCapabilityMessage(text,capability);
   return;
