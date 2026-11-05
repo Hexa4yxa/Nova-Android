@@ -22,9 +22,24 @@ test('image command does not route a normal chat message',()=>{
  assert.ok(re.test('Создай картинку'));
  assert.ok(re.test('Нарисуй изображение: туманный лес'));
  assert.ok(re.test('Зроби зображення туманний ліс'));
+ assert.ok(re.test('Нова, сделай страшную картинку с зеркалом'));
+ assert.ok(re.test('Сделай мне красивую картинку'));
  assert.equal(re.test('Привет, Нова'),false);
  assert.equal(re.test('Создай видео'),false);
+ assert.equal(re.test('Не создавай картинку'),false);
+ assert.equal(re.test('Пожалуйста, найди картинку'),false);
 });
 test('history stores only lightweight text, not base64 images',()=>{
  assert.match(js,/\.map\(m=>\(\{who:m\.who,text:m\.text\}\)\)/);
+});
+
+test('local drawing calls are explicit and diagnostics are available',()=>{
+ assert.match(js,/const drawCommand=/);
+ assert.match(js,/openLocalDream/);
+ assert.match(js,/check\.onclick\(\)/);
+ assert.match(js,/Number\(sizeSelect\.value\)/);
+ assert.match(js,/Зеркало без лица/);
+ assert.match(js,/Туманный лес/);
+ assert.match(js,/Аниме/);
+ assert.match(js,/img\.src=result\.preview/);
 });
