@@ -431,13 +431,15 @@ async function showBrainManager(){
    const result=await image.imageModels();
    const models=Array.isArray(result.models)?result.models:[];
    imageState.textContent=!result.installed?'⚠ Нативный движок отсутствует в APK.':
-      models.length?'✅ NOVA Native: найден графический мозг. Выбранная модель загрузится при запросе.':
+      models.some(item=>item.testedOnDevice)?'✅ NOVA Native: генерация PNG уже подтверждена на этом телефоне.':
+      models.length?'ℹ Графическая модель установлена. Создание PNG на этом телефоне ещё не проверено.':
       'ℹ Движок встроен. Для картинок нужна собственная модель в NOVA, добавь её один раз.';
    if(!models.length)add(imagesBox,'p','brain-caption','Встроенный генератор установлен. Для первого запуска нужна графическая модель SD 1.5. Ниже можно скачать проверенный вариант прямо в NOVA, без других приложений.');
    for(const item of models){
     const row=add(imagesBox,'div','brain-row');
     add(row,'div','',(item.selected?'✅ ● ':'')+item.name);
-    add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+(item.selected?'выбрана для автоматического запуска':'доступна')+(item.validated?' · SHA-256 проверена':' · совместимость ещё не проверена'));
+    add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+(item.selected?'выбрана для автоматического запуска':'доступна')+(item.testedOnDevice?' · PNG успешно создан':item.validated?' · SHA-256 проверена, генерация ещё не проверена':' · генерация ещё не проверена'));
+    if(item.lastError)add(row,'div','brain-caption','⚠ Последняя ошибка: '+item.lastError);
     if(!item.selected){
      const select=add(row,'button','','🎨 Выбрать');
      select.disabled=result.generating;
@@ -585,7 +587,8 @@ function renderNovaImageStudio(initialPrompt=''){
    status.textContent='Проверяю встроенный графический движок NOVA...';
    try{
      const response=await plugin.status();
-     status.textContent=response.ready?'✅ Графический движок NOVA готов.':'⚠ '+response.detail;
+     status.textContent=(response.ready?(response.testedOnDevice?'✅ ':'ℹ '):'⚠ ')+(response.detail||'Нет данных')+
+       (Number.isFinite(Number(response.freeMemoryMib))?'\nСвободно RAM: '+response.freeMemoryMib+' МиБ':'');
    }catch(e){status.textContent='⚠ '+(e?.message||String(e));}
    finally{check.disabled=false;}
  };
