@@ -3,7 +3,7 @@ name: NOVA Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads, feature/nova-local-image-tools]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads, feature/nova-local-image-tools, feature/nova-image-pilot-stable]
 
 jobs:
   build:
@@ -64,16 +64,16 @@ jobs:
         run: npx cap sync android
 
       - name: Check Director Council UI syntax and wiring
-        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads' || github.ref == 'refs/heads/feature/nova-local-image-tools'
+        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads' || github.ref == 'refs/heads/feature/nova-local-image-tools' || github.ref == 'refs/heads/feature/nova-image-pilot-stable'
         run: |
           node --test tests/council-ui.test.cjs
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ]; then node --test tests/nova-tools-ui.test.cjs; fi
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ]; then node --test tests/nova-image-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-pilot-stable' ]; then node --test tests/nova-tools-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-pilot-stable' ]; then node --test tests/nova-image-ui.test.cjs; fi
 
       - name: Build APK and run Kotlin unit tests
         working-directory: android
         run: |
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ]; then
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-pilot-stable' ]; then
             bash gradlew testDebugUnitTest assembleDebug --no-daemon
           else
             bash gradlew assembleDebug --no-daemon
@@ -85,6 +85,18 @@ jobs:
           name: NOVA-AI-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish NOVA Image Pilot Stable APK
+        if: github.ref == 'refs/heads/feature/nova-image-pilot-stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-Image-Pilot-Stable.apk
+          gh release create "nova-image-pilot-stable-${{ github.run_number }}" release/NOVA-Image-Pilot-Stable.apk \
+            --title "NOVA Image Pilot Stable #${{ github.run_number }}" \
+            --notes "Experimental standalone NOVA: model-aware Local Dream connection check, PNG output fallback, cinematic presets and cancel. Requires running Local Dream locally. On-device validation still needed." \
+            --prerelease --target "${{ github.sha }}"
 
       - name: Publish isolated NOVA Image Pilot APK
         if: github.ref == 'refs/heads/feature/nova-local-image-tools'
