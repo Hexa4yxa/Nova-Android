@@ -168,12 +168,16 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=256){
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
  imageBusy=true;
  let subscription=null;
+ let imageReserved=false;
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
  try{
    onProgress('🔎 Проверяю локальный генератор...');
    const state=await bridge.status();
    if(!state.ready)throw new Error(state.detail||'Графическая модель не установлена в NOVA');
-   const brain=window.Capacitor?.Plugins?.NovaBrain;
-   if(brain){onProgress('🧠 Освобождаю память для рисования...');await brain.releaseForImage();}
+   if(!brain)throw new Error('Менеджер моделей NOVA недоступен.');
+   onProgress('🧠 Освобождаю память для рисования...');
+   await brain.releaseForImage();
+   imageReserved=true;
    subscription=await bridge.addListener('novaImageProgress',e=>{
      const total=e.total||20;
      onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов. Работа офлайн.');
@@ -184,6 +188,11 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=256){
    return result;
  }finally{
    try{await subscription?.remove();}catch(_){}
+   // Cleanup if an error happened between text unload and native image start.
+   if(imageReserved){
+     try{await brain.finishImageWork();}
+     catch(e){console.warn('NOVA: ошибка освобождения резерва RAM',e);}
+   }
    imageBusy=false;
  }
 }
@@ -544,7 +553,7 @@ function renderNovaImageStudio(initialPrompt=''){
  }
  sizeSelect.value='256';
  const controls=node(panel,'div','tool-actions');
- const openDream=node(controls,'button','','📱 Открыть Local Dream');
+ const openDream=node(controls,'button','','📂 Добавить модель в NOVA');
  const check=node(controls,'button','','🔎 Проверить');
  const generate=node(controls,'button','','🎨 Создать 256×256');
  sizeSelect.onchange=()=>{generate.textContent='🎨 Создать '+sizeSelect.value+'×'+sizeSelect.value;};
