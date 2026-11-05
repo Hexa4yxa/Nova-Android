@@ -133,7 +133,7 @@ class NovaBrainPlugin : Plugin() {
             files.forEach { (id, file) ->
                 models.put(JSObject().apply {
                     put("id", id)
-                    put("name", if (id == "legacy") "Gemma / ранее импортированная GGUF"
+                    put("name", if (id == "legacy") "Основная сохранённая GGUF"
                         else modelPrefs.getString("name_" + id, file.name))
                     put("bytes", file.length())
                     put("selected", id == selected)
@@ -337,6 +337,8 @@ class NovaBrainPlugin : Plugin() {
                 }
 
                 brain.loadModel(destination.absolutePath)
+                activeModelId = "legacy"
+                modelPrefs.edit().putString("selected_id", "legacy").apply()
 
                 val response = JSObject()
                 response.put("loaded", true)
