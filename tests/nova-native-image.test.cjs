@@ -69,3 +69,23 @@ test('the new bridge and image module remain isolated from working text GGUF',()
  assert.match(read('android/app/src/main/java/ai/nova/director/NovaBrainPlugin.kt'),/releaseForImage/);
  assert.match(read('android/nova-image/src/main/java/ai/nova/image/NativeImageEngine.kt'),/loadLibrary\("nova-image"\)/);
 });
+
+test('native image preflight uses RAM and thermal checks before starting diffusion',()=>{
+ const safety=read('android/app/src/main/java/ai/nova/director/NovaImageSafety.kt');
+ const tests=read('android/app/src/test/java/ai/nova/director/NovaImageSafetyTest.kt');
+ assert.match(safety,/MIN_FREE_MIB_256/);
+ assert.match(safety,/MIN_FREE_MIB_512/);
+ assert.match(safety,/thermalSevere/);
+ assert.match(safety,/systemLowMemory/);
+ assert.match(kotlin,/PowerManager\.THERMAL_STATUS_SEVERE/);
+ assert.match(kotlin,/private fun resourceWarning\(size: Int\)/);
+ const guardPos=kotlin.indexOf('val unsafe = try { resourceWarning(size) }');
+ const inferencePos=kotlin.indexOf('val rgb = NativeImageEngine.generate(');
+ assert.ok(guardPos > 0 && inferencePos > guardPos,
+   'preflight must run before native model allocation');
+ assert.match(kotlin,/NovaComputeGate\.finishImage\(\)\s*call\.reject\(unsafe\)/);
+ assert.match(js,/resources\.resourceWarning/);
+ assert.match(js,/response\.resourceWarning/);
+ assert.match(tests,/fun overheatingBlocksBothImageSizes/);
+ assert.match(tests,/fun qualityModeRequiresMoreRamThanQuickMode/);
+});
