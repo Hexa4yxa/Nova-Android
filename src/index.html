@@ -94,7 +94,7 @@ function saveHistory(){
    JSON.stringify(history.slice(1).filter(m=>
     m.text!=='🎬 NOVA думает...' &&
     !m.text.startsWith('❌')
-   ).slice(-100))
+   ).slice(-100).map(m=>({who:m.who,text:m.text})))
   );
  }catch(e){ console.warn('История не сохранена',e); }
 }
@@ -102,6 +102,13 @@ function addMessage(who,text,preview){
  const el=document.createElement('div');
  el.className='message '+who;
  el.textContent=text;
+ if(typeof preview==='string' && preview.startsWith('data:image/png;base64,') && preview.length<5000000){
+  const img=document.createElement('img');
+  img.src=preview;
+  img.className='nova-image-preview';
+  img.alt='Изображение, созданное NOVA';
+  el.appendChild(img);
+ }
  content.appendChild(el);
 }
 function showChat(){
@@ -133,7 +140,7 @@ let awaitingImageDescription=false;
 let imageBusy=false;
 let imageLastResult=null;
 let imagePromptDraft='';
-const imageCommand=/^\\s*(?:нова[,\\s]+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\\s+(?:мне\\s+)?(?:картинку|изображение|фото|фотографию|кадр|малюнок|зображення)(?:\\s*[:\\-–]\\s*|\\s+|$)/i;
+const imageCommand=/^\s*(?:нова[,\s]+)?(?:создай|сгенерируй|нарисуй|сделай|зроби|намалюй|згенеруй)\s+(?:мне\s+)?(?:картинку|изображение|фото|фотографию|кадр|малюнок|зображення)(?:\s*[:\-–]\s*|\s+|$)/i;
 
 function imageRequest(text){
  const match=text.match(imageCommand);
@@ -204,6 +211,18 @@ async function handleImageMessage(text,requestedPrompt){
 async function send(){
  const text=input.value.trim();
  if(!text || busy)return;
+
+ const imagePrompt=imageRequest(text);
+ if(imagePrompt!==null || awaitingImageDescription){
+  if(awaitingImageDescription && /^(отмена|скасувати|cancel)$/i.test(text)){
+   awaitingImageDescription=false;
+   history.push({who:'user',text});
+   history.push({who:'nova',text:'Создание картинки отменено.'});
+   input.value='';saveHistory();showChat();return;
+  }
+  await handleImageMessage(text,imagePrompt===null?text:imagePrompt);
+  return;
+ }
 
  busy=true;
  document.getElementById('send').disabled=true;
