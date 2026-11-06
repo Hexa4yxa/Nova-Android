@@ -28,6 +28,15 @@ nav span{cursor:pointer;padding:5px 1px;white-space:nowrap}
 nav{font-size:11px;gap:4px}
 .brain-row{padding:14px;margin:10px 0;border:1px solid #344059;border-radius:14px;background:#141c2d;line-height:1.5}
 .brain-row button{margin-top:10px;padding:10px 14px;font-size:13px;min-height:42px}
+.nova-more{margin:14px 0 2px;border-top:1px solid #38445f;padding-top:12px}
+.nova-more summary{cursor:pointer;list-style:none;color:#c6ccff;font-weight:600;font-size:14px;padding:11px 0}
+.nova-more summary::-webkit-details-marker{display:none}
+.nova-more summary::before{content:"▸";margin-right:9px}
+.nova-more[open] summary::before{content:"▾"}
+.nova-more .brain-row{background:#161d30}
+.nova-more .council-button{font-size:13px;padding:10px 14px;min-height:42px}
+.brain-main-status{font-size:13px;color:#aab8d5;margin:4px 0 12px}
+.brain-selected{font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .brain-caption{font-size:12px;color:#b6c1d6;overflow-wrap:anywhere;margin-top:5px}
 .nova-download-progress{display:block;width:100%;height:9px;margin:10px 0 3px;accent-color:#888bff}
 button:focus-visible,nav span:focus-visible{outline:2px solid #b4b7ff;outline-offset:3px}
@@ -477,27 +486,32 @@ async function showBrainManager(){
   return el;
  };
  const llm=add(content,'section','panel');
- add(llm,'div','council-heading','🧠 Текстовые мозги · GGUF');
- add(llm,'p','tool-warning','Для разговора и режиссёрского совета нужна исправная GGUF. Её можно скопировать в Загрузки → NOVA-Models через кнопку экспорта; рабочая копия останется внутри NOVA.');
- const llmState=add(llm,'p','small','Проверяю текстовые модели...');
+ add(llm,'div','council-heading','🧠 Текст · Gemma / GGUF');
+ const llmState=add(llm,'p','brain-main-status','Проверяю текстовую модель...');
  const modelsBox=add(llm,'div','');
- const importBtn=add(llm,'button','council-button','📥 Добавить GGUF с телефона');
+ const llmMore=add(llm,'details','nova-more');
+ const llmMoreTitle=add(llmMore,'summary','','⚙ Другие модели и управление');
+ const otherModelsBox=add(llmMore,'div','');
+ const exportBox=add(llmMore,'div','');
+ const importBtn=add(llmMore,'button','council-button','📥 Добавить GGUF с телефона');
+
  const imagePanel=add(content,'section','panel');
- add(imagePanel,'div','council-heading','🎨 Мозг картинок · NOVA Native');
- const imageState=add(imagePanel,'p','small','Ищу установленные модели изображений...');
+ add(imagePanel,'div','council-heading','🎨 Картинки · Stable Diffusion');
+ const imageState=add(imagePanel,'p','brain-main-status','Проверяю генератор изображений...');
  const imagesBox=add(imagePanel,'div','');
- const imageTestStatus=add(imagePanel,'div','brain-caption','');
- const imageTestPreview=add(imagePanel,'div','');
- const downloadsBox=add(imagePanel,'div','');
- const openDream=add(imagePanel,'button','council-button','📂 Импортировать модель с телефона');
- const restoreBackup=add(imagePanel,'button','council-button','♻️ Восстановить SD 1.5 из NOVA-Models');
- const restoreStatus=add(imagePanel,'p','brain-caption','Резервная копия: Загрузки → NOVA-Models. NOVA никогда не удаляет исходный файл.');
+ const imageMore=add(imagePanel,'details','nova-more');
+ add(imageMore,'summary','','⚙ Другие модели, копии и диагностика');
+ const imageOtherModelsBox=add(imageMore,'div','');
+ const resourceBox=add(imageMore,'div','');
+ const imageTestStatus=add(imageMore,'div','brain-caption','');
+ const imageTestPreview=add(imageMore,'div','');
+ const downloadsBox=add(imageMore,'div','');
+ const openDream=add(imageMore,'button','council-button','📂 Импортировать модель с телефона');
+ const restoreBackup=add(imageMore,'button','council-button','♻️ Восстановить SD 1.5 из NOVA-Models');
+ const restoreStatus=add(imageMore,'p','brain-caption','Резервная копия: Загрузки → NOVA-Models. Исходный файл сохраняется.');
  restoreBackup.disabled=!backup;
  if(!backup)restoreStatus.textContent='В этой APK ещё нет восстановления из резервной копии.';
- const refresh=add(imagePanel,'button','council-button','↻ Проверить мозги');
- const extras=add(content,'section','panel');
- add(extras,'div','council-heading','🔭 Следующие способности');
- add(extras,'p','small','Зрение, локальный голос и видеодвижок появятся здесь, когда будут подключены и проверены. Пока это не работающие модули.');
+ const refresh=add(imageMore,'button','council-button','↻ Проверить мозги');
 
  async function refreshLLM(){
   modelsBox.replaceChildren();
