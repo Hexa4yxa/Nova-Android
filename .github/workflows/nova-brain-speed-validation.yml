@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: nova-brain-speed-validation
@@ -78,4 +78,20 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # This workflow never signs or publishes a stable APK.
+      - name: Publish a clearly labeled experimental APK for direct mobile download
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="nova-brains-speed-test-2026-11-06"
+          cp android/app/build/outputs/apk/debug/app-debug.apk NOVA-Brains-Speed-TEST.apk
+          gh release create "$tag" NOVA-Brains-Speed-TEST.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "NOVA brains & image speed - experimental TEST, not stable" \
+            --notes "EXPERIMENTAL DEBUG APK. Installs separately from NOVA Stable and does not contain its private model files. Not a signed update. Do not uninstall your working NOVA or delete its data. Adds GGUF format diagnostics, model export and 8/12/24-step image generation options." \
+            --latest=false
+
+      # Never sign or publish this build as a stable APK.
