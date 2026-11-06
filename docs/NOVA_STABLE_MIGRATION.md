@@ -76,11 +76,20 @@ Expected SHA-256:
 workflow. It intentionally fails if any of the following GitHub Actions
 repository secrets are missing:
 
-- `NOVA_SIGNING_KEYSTORE_B64` — base64-encoded binary keystore (not a raw
-  private key in the repository)
-- `NOVA_SIGNING_STORE_PASSWORD`
-- `NOVA_SIGNING_KEY_ALIAS`
-- `NOVA_SIGNING_KEY_PASSWORD`
+- `NOVA_SIGNING_KEYSTORE_B64` — base64-encoded owner-owned PKCS12 keystore
+- `NOVA_SIGNING_PASSWORD` — long, randomly generated password for the
+  keystore and its `nova-stable` key alias
+
+The project pins the **public certificate SHA-256** in
+`android/signing/NOVA_STABLE_CERT_SHA256.txt`. GitHub Actions compares it
+against both the supplied keystore and signed APK. A rotated or incorrect
+keystore makes the release fail rather than causing another update conflict.
+
+The owner-only signing key was created for this migration and packaged for
+private download; it is **not** uploaded to GitHub source or posted into the
+chat. The owner must download and preserve the ZIP; GitHub's Android workflow
+cannot read it until the owner copies the two values above into repository
+Actions secrets.
 
 The owner must generate a secure long-lived signing key and keep an encrypted
 backup **outside the project and outside the phone if possible**. Losing it
