@@ -143,7 +143,22 @@ jobs:
           cp "$APK" release/NOVA-Stable.apk
           sha256sum release/NOVA-Stable.apk > release/SHA256SUMS.txt
 
+      # Preserve the verified signed APK independently of Releases write access.
+      # Artifact upload uses the Actions artifact service and does not include
+      # keystores, passwords, or private signing material.
+      - name: Upload verified stable APK as downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-Stable-${{ github.run_number }}
+          path: |
+            release/NOVA-Stable.apk
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Publish signed APK for in-place stable updates
+        id: publish_release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -152,6 +167,19 @@ jobs:
             --title "NOVA Stable #${{ github.run_number }}" --prerelease \
             --notes "Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
             --target "$(git rev-parse HEAD)"
+
+      - name: Explain release publishing fallback
+        if: steps.publish_release.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::GitHub Releases publishing was denied. The validated owner-signed NOVA-Stable.apk was uploaded to Actions Artifacts instead."
+          {
+            echo "### NOVA Stable APK ready in Actions Artifacts"
+            echo ""
+            echo "GitHub Releases returned a permissions error, but APK building, permanent signature verification, and artifact upload succeeded."
+            echo "Open the run page and download **NOVA-Stable-${{ github.run_number }}** from **Artifacts**. ZIP contains NOVA-Stable.apk and SHA256SUMS.txt."
+            echo "This is a first side-by-side install. Do NOT uninstall old NOVA or delete models."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clean up signing file
         if: always()
