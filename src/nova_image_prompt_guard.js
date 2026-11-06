@@ -42,6 +42,14 @@
   function matchesSubject(value) {
     return hints.filter(item => item.source.test(value));
   }
+  function isBareSubject(raw) {
+    const original = String(raw || '').trim();
+    const matched = matchesSubject(original);
+    if (!matched.length) return false;
+    let remainder = original;
+    for (const hint of matched) remainder = remainder.replace(hint.source, ' ');
+    return !/[0-9a-zа-яёіїєґ]/iu.test(remainder);
+  }
   function fallbackPrompt(hits) {
     const main = hits.find(item => item.label === 'dachshund dog') ||
       hits.find(item => item.label === 'dog') || hits[0];
@@ -65,7 +73,7 @@
     if (cyrillic.test(original)) {
       // A short, recognized request can be converted safely without another model.
       // For longer/unrecognized descriptions, abort rather than spend 20 minutes on unrelated scenery.
-      if (preferred.length && original.length <= 80) {
+      if (preferred.length && isBareSubject(original)) {
         return { prompt: fallbackPrompt(preferred),
           subject: preferred.map(item => item.label).join(', '), fallback: true, translated: true };
       }
@@ -80,5 +88,5 @@
     }
     throw new Error('Не удалось подготовить описание картинки на английском языке.');
   }
-  root.NovaImagePromptGuard = Object.freeze({ prepare, isEnglishPrompt, matchesSubject });
+  root.NovaImagePromptGuard = Object.freeze({ prepare, isEnglishPrompt, matchesSubject, isBareSubject });
 })(typeof window !== 'undefined' ? window : globalThis);
