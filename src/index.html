@@ -515,25 +515,34 @@ async function showBrainManager(){
 
  async function refreshLLM(){
   modelsBox.replaceChildren();
-  if(!brain){llmState.textContent='Android-мост NovaBrain отсутствует.';importBtn.disabled=true;return;}
+  otherModelsBox.replaceChildren();
+  exportBox.replaceChildren();
+  if(!brain){llmState.textContent='⚠ Текстовый движок недоступен.';importBtn.disabled=true;return;}
   try{
    const data=await brain.listModels();
-   llmState.textContent=data.loading?'🟡 Загрузка модели...':
-      data.ready?'✅ Текстовый мозг готов: '+data.engine:
-      'ℹ Текстовая модель не загружена. Выбери исправную GGUF.';
    const models=Array.isArray(data.models)?data.models:[];
+   const primary=models.find(item=>item.active&&item.valid!==false)||
+    models.find(item=>item.selected&&item.valid!==false)||
+    models.find(item=>item.valid!==false)||models[0];
+   const hiddenCount=models.length-(primary?1:0);
+   llmMoreTitle.textContent='⚙ Другие модели и управление'+(hiddenCount?' · '+hiddenCount:'');
+   llmState.textContent=data.loading?'🟡 Текстовый мозг загружается...':
+    data.ready?'✅ Готов к разговору · офлайн':
+    primary&&primary.valid!==false?'ℹ Модель есть, но ещё не загружена':
+    '⚠ Нужна исправная GGUF для разговора';
    if(!models.length){
-    add(modelsBox,'p','brain-caption','GGUF пока нет в этой установке NOVA. Нажми «Добавить GGUF» один раз.');
+    add(modelsBox,'p','brain-caption','Текстовая модель ещё не добавлена.');
+    llmMore.open=true;
    }
    for(const item of models){
-    const row=add(modelsBox,'div','brain-row');
     const valid=item.valid!==false;
-    add(row,'div','',(valid?(item.active?'✅ ':''):'⚠ ')+
-      (item.selected?'● ':'')+(item.name||'GGUF'));
+    const main=item===primary;
+    const row=add(main?modelsBox:otherModelsBox,'div','brain-row');
+    add(row,'div',main?'brain-selected':'',(item.active?'✅ ':'')+(valid?'':'⚠ ')+(item.name||'GGUF'));
     add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+
-      (!valid?'не GGUF или файл повреждён':item.active?'активна':item.selected?'выбрана для автозапуска':'доступна'));
+     (!valid?'ошибка формата (сохранён без удаления)':item.active?'подключена':item.selected?'выбрана для запуска':'доступна'));
     if(!valid){
-     add(row,'p','brain-caption','Этот файл NOVA не запустит. Он остаётся на месте. Нажми «Добавить GGUF» и выбери исправный оригинал.');
+     add(row,'p','brain-caption','Файл не является корректной GGUF. Оставляем его без изменений.');
      continue;
     }
     if(!item.active){
@@ -541,25 +550,27 @@ async function showBrainManager(){
      select.disabled=data.loading;
      select.onclick=async()=>{
       select.disabled=true;
-      llmState.textContent='Загружаю GGUF. Другие модели будут выгружены из памяти.';
+      llmState.textContent='Загружаю модель...';
       try{await brain.activateSavedModel({id:item.id});await refreshLLM();}
       catch(e){llmState.textContent='⚠ '+(e?.message||String(e));select.disabled=false;}
      };
     }
-    const exportBtn=add(row,'button','','📁 Скопировать в NOVA-Models');
+    const exportBtn=add(main?exportBox:row,'button',main?'council-button':'','📁 Копировать GGUF в NOVA-Models');
     exportBtn.disabled=data.loading;
     exportBtn.onclick=async()=>{
      exportBtn.disabled=true;
-     llmState.textContent='Выбери Загрузки → NOVA-Models и нажми «Сохранить». Копирование большой модели займёт время.';
+     llmMore.open=true;
+     llmState.textContent='Выбери Загрузки → NOVA-Models и нажми «Сохранить». Исходная модель останется в NOVA.';
      try{
       await brain.exportSavedModel({id:item.id});
-      llmState.textContent='✅ GGUF сохранена в выбранную папку. Исходная модель внутри NOVA не изменена.';
+      llmState.textContent='✅ Модель скопирована. Исходная GGUF сохранена.';
      }catch(e){llmState.textContent='⚠ Экспорт: '+(e?.message||String(e));}
      finally{exportBtn.disabled=false;}
     };
    }
    if(models.length && models.every(item=>item.valid===false)){
-    llmState.textContent='⚠ Найден файл с неверным форматом GGUF. NOVA его не удалит. Нажми «Добавить GGUF» для восстановления текстового мозга.';
+    llmMore.open=true;
+    llmState.textContent='⚠ Исправной GGUF нет. Старые файлы не удалены, выбери работающую модель.';
    }
   }catch(e){llmState.textContent='⚠ '+(e?.message||String(e));}
  }
