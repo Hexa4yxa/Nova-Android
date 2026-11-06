@@ -30,6 +30,7 @@ class NovaBrainPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val generating = AtomicBoolean(false)
     private val modelLoading = AtomicBoolean(false)
+    private val exportingModel = AtomicBoolean(false)
     @Volatile private var activeModelId: String = ""
     private val stopRequested = AtomicBoolean(false)
     @Volatile private var councilPhase = ""
@@ -60,15 +61,24 @@ class NovaBrainPlugin : Plugin() {
     }
 
     private fun selectedModelId(): String? {
+        // A large renamed download is not necessarily a GGUF. Do not autoload invalid files.
+        fun usable(id: String): Boolean = resolveModel(id)?.let { isValidGguf(it) } == true
         val id = modelPrefs.getString("selected_id", null)
-        if (id != null && resolveModel(id) != null) return id
-        if (resolveModel("legacy") != null) return "legacy"
+        if (id != null && usable(id)) return id
+        if (usable("legacy")) return "legacy"
         return modelDirectory().listFiles()
             ?.filter { it.isFile && it.name.endsWith(".gguf") }
             ?.map { it.name.removeSuffix(".gguf") }
-            ?.filter { resolveModel(it) != null }
+            ?.filter { usable(it) }
             ?.sorted()
             ?.firstOrNull()
+    }
+
+    private fun isValidGguf(file: File): Boolean = try {
+        checkGguf(file)
+        true
+    } catch (_: Exception) {
+        false
     }
 
     private fun checkGguf(file: File) {
@@ -179,6 +189,7 @@ class NovaBrainPlugin : Plugin() {
                     put("name", if (id == "legacy") "Основная сохранённая GGUF"
                         else modelPrefs.getString("name_" + id, file.name))
                     put("bytes", file.length())
+                    put("valid", isValidGguf(file))
                     put("selected", id == selected)
                     put("active", activeModelId == id && brain.state() == "ModelReady")
                 })
@@ -193,6 +204,71 @@ class NovaBrainPlugin : Plugin() {
             })
         } catch (e: Exception) {
             call.reject("Не удалось получить список моделей: " + e.message, e)
+        }
+    }
+
+    /**
+     * Owner chooses a visible destination (for example Download/NOVA-Models).
+     * Export is a COPY: the model in NOVA is never moved or deleted.
+     */
+    @PluginMethod
+    fun exportSavedModel(call: PluginCall) {
+        val id = call.getString("id") ?: selectedModelId().orEmpty()
+        val model = resolveModel(id)
+        if (model == null || !isValidGguf(model)) {
+            call.reject("Эта модель не является исправной GGUF. Её нельзя экспортировать как рабочую.")
+            return
+        }
+        if (!exportingModel.compareAndSet(false, true)) {
+            call.reject("Экспорт другой модели уже выполняется")
+            return
+        }
+        try {
+            val preferredName = if (id == "legacy") "NOVA-text-model.gguf"
+                else modelPrefs.getString("name_" + id, "NOVA-text-model.gguf").orEmpty()
+            val safeName = preferredName.substringAfterLast('/').substringAfterLast('\\').take(90)
+                .let { if (it.endsWith(".gguf", ignoreCase = true)) it else "$it.gguf" }
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                type = "application/octet-stream"
+                addCategory(Intent.CATEGORY_OPENABLE)
+                putExtra(Intent.EXTRA_TITLE, safeName)
+            }
+            startActivityForResult(call, intent, "modelExportSelected")
+        } catch (e: Exception) {
+            exportingModel.set(false)
+            call.reject("Не удалось открыть сохранение модели: " + e.message, e)
+        }
+    }
+
+    @ActivityCallback
+    private fun modelExportSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            exportingModel.set(false)
+            call.reject("Экспорт отменён")
+            return
+        }
+        scope.launch {
+            try {
+                val id = call.getString("id") ?: selectedModelId().orEmpty()
+                val model = resolveModel(id) ?: error("Исходная модель больше недоступна")
+                checkGguf(model)
+                model.inputStream().buffered(1024 * 1024).use { input ->
+                    context.contentResolver.openOutputStream(uri, "w").use { output ->
+                        requireNotNull(output) { "Не удалось создать копию модели" }
+                        input.copyTo(output, 1024 * 1024)
+                    }
+                }
+                call.resolve(JSObject().apply {
+                    put("exported", true)
+                    put("bytes", model.length())
+                    put("sourcePreserved", true)
+                })
+            } catch (e: Exception) {
+                call.reject("Экспорт не завершён. Исходная модель сохранена: " + e.message, e)
+            } finally {
+                exportingModel.set(false)
+            }
         }
     }
 
@@ -412,36 +488,30 @@ class NovaBrainPlugin : Plugin() {
         }
 
         scope.launch {
+            var temporary: File? = null
             try {
-                val destination = java.io.File(context.filesDir, "nova-model.gguf")
-                val temporary = java.io.File(context.filesDir, "nova-model.tmp")
-
-                try {
-                    context.contentResolver.openInputStream(uri).use { input ->
-                        requireNotNull(input) { "Не удалось открыть GGUF" }
-                        temporary.outputStream().use { output ->
-                            input.copyTo(output, 1024 * 1024)
-                        }
+                // Never overwrite the old nova-model.gguf before validating the replacement.
+                val id = UUID.randomUUID().toString()
+                temporary = File(modelDirectory(), "$id.partial")
+                val destination = File(modelDirectory(), "$id.gguf")
+                context.contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Не удалось открыть GGUF" }
+                    temporary!!.outputStream().buffered().use { output ->
+                        input.copyTo(output, 1024 * 1024)
                     }
-
-                    if (!temporary.renameTo(destination)) {
-                        throw IllegalStateException("Не удалось сохранить модель")
-                    }
-                } finally {
-                    temporary.delete()
                 }
-
-                brain.loadModel(destination.absolutePath)
-                activeModelId = "legacy"
-                modelPrefs.edit().putString("selected_id", "legacy").apply()
-
-                val response = JSObject()
-                response.put("loaded", true)
-                response.put("path", destination.absolutePath)
-                call.resolve(response)
+                checkGguf(temporary!!)
+                check(temporary!!.renameTo(destination)) { "Не удалось сохранить модель" }
+                modelPrefs.edit().putString("name_" + id, "Импортированная GGUF").apply()
+                activateModel(id)
+                call.resolve(JSObject().apply {
+                    put("loaded", true)
+                    put("path", destination.absolutePath)
+                })
             } catch (e: Exception) {
-                call.reject("Ошибка импорта модели: " + e.toString(), e)
+                call.reject("Ошибка импорта модели: " + e.message, e)
             } finally {
+                temporary?.delete()
                 modelLoading.set(false)
                 NovaComputeGate.leaveText()
             }
