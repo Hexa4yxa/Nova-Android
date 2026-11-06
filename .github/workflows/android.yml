@@ -104,6 +104,33 @@ jobs:
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libnova-image.so'
           echo 'Native image engine included; real generation requires a compatible model and on-device verification.'
 
+      # Prove the *release* build path compiles before asking the owner to
+      # configure secrets. Sign this disposable APK with a temporary key and
+      # NEVER publish or upload it: it must not become the stable signer.
+      - name: Smoke-test Stable release package with throwaway CI signer
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NOVA_SIGNING_PASSWORD="$(openssl rand -hex 24)"
+          export NOVA_STABLE_KEYSTORE_PATH="$RUNNER_TEMP/nova-throwaway-ci.p12"
+          export NOVA_STABLE_VERSION_CODE=100001
+          keytool -genkeypair -alias nova-stable -keyalg RSA -keysize 2048 \
+            -validity 1 -storetype PKCS12 \
+            -keystore "$NOVA_STABLE_KEYSTORE_PATH" \
+            -storepass:env NOVA_SIGNING_PASSWORD -keypass:env NOVA_SIGNING_PASSWORD \
+            -dname "CN=NOVA Throwaway CI Test" -noprompt >/dev/null
+          bash gradlew assembleRelease --no-daemon
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+          rm -f "$NOVA_STABLE_KEYSTORE_PATH" "$APK"
+          echo "Release build/package smoke test passed. No real stable APK was published."
+
       # Debug APKs from disposable GitHub-runner keys CANNOT update the existing
       # NOVA native-image install. Do not publish them as user-facing releases.
       # Keep CI artifact solely for developer inspection.
