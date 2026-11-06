@@ -34,12 +34,16 @@ object NativeImageEngine {
         return nativeGenerate(modelPath, prompt, negativePrompt, size, steps, seed)
     }
 
+    /** Last completed or interrupted request: [model loading ms, sampling ms]. */
+    fun timings(): LongArray = if (libraryReady()) nativeTimings() else longArrayOf(0L, 0L)
+
     fun cancel(): Boolean = libraryReady() && nativeCancel()
     fun progress(): IntArray = if (libraryReady()) nativeProgress() else intArrayOf(0, 0)
     private external fun nativeGenerate(
         modelPath: String, prompt: String, negativePrompt: String,
         size: Int, steps: Int, seed: Long
     ): ByteArray
+    private external fun nativeTimings(): LongArray
     private external fun nativeCancel(): Boolean
     private external fun nativeProgress(): IntArray
 }
