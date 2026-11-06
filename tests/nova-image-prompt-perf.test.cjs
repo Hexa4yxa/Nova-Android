@@ -27,6 +27,10 @@ test('NOVA does not silently use Russian text for an English-centric SD1.5 image
  assert.equal(translated.fallback,false);
  assert.match(translated.prompt,/dachshund/i);
  assert.throws(()=>guard.prepare('космический корабль','русский текст'),/не смогла надёжно перевести/);
+ assert.equal(guard.isBareSubject('собачки'),true);
+ assert.equal(guard.isBareSubject('собаки таксы'),true);
+ assert.equal(guard.isBareSubject('собака в лесу'),false);
+ assert.throws(()=>guard.prepare('собака в лесу','unrelated empty landscape'),/не смогла надёжно перевести/);
 });
 
 test('English subject prompts are preserved without forced translation',()=>{
@@ -45,6 +49,8 @@ test('Image guard runs before freeing models or any costly native rendering',()=
  assert.ok(guardCall>0 && guardCall<freeMemory && freeMemory<drawing);
  assert.match(js,/result\.promptUsed=visualPrompt/);
  assert.match(js,/result\.subject=prepared\.subject/);
+ assert.match(js,/await brain\.prepare\(\)/);
+ assert.match(js,/promptGuard\.isBareSubject\(prompt\)/);
 });
 
 test('Model loading and sampling are measured separately by the native library',()=>{
