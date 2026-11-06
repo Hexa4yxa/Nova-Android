@@ -646,9 +646,12 @@ async function showBrainManager(){
    downloadsBox.replaceChildren();
    if(downloads){
     const installed=await downloads.recommendedStatus();
+    const state=installed.state||'available';
+    if(state==='installed' && models.length){
+     add(downloadsBox,'p','brain-caption','✅ Рекомендуемая SD 1.5 скачана и проверена. Состояние копии можно увидеть здесь, повторная загрузка не нужна.');
+    }else{
     const row=add(downloadsBox,'div','brain-row');
     add(row,'div','','📦 Рекомендуемая SD 1.5 FP16 · 2,13 ГБ');
-    const state=installed.state||'available';
     const received=Number(installed.received||0);
     const total=Number(installed.total)>0?Number(installed.total):Number(installed.approxBytes||2130000000);
     let detail='';
@@ -706,6 +709,7 @@ async function showBrainManager(){
       try{await downloads.cancelRecommended();await refreshImages();}
       catch(e){imageState.textContent='⚠ '+(e?.message||String(e));cancelDownload.disabled=false;}
      };
+    }
     }
    }
   }catch(e){imageState.textContent='⚠ '+(e?.message||String(e));}
