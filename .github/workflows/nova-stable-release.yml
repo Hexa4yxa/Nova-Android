@@ -127,13 +127,17 @@ jobs:
           test -x "$BUILD_TOOLS/aapt"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
           EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          # Android build-tools may print either "Signer #1 ..." or
+          # "V2 Signer: ...". Both formats identify the same public signer.
+          # Read just the hash; never output the signing key or its password.
           ACTUAL="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" \
-            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
-            | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::Signed APK fingerprint does not match pinned NOVA Stable certificate."
+            | sed -n -E 's/^(V[123] Signer: |Signer #[0-9]+ )certificate SHA-256 digest: ([0-9a-fA-F]{64})$/\2/p' \
+            | sed -n '1p' | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          if ! [[ "$ACTUAL" =~ ^[0-9A-F]{64}$ ]] || [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Signed APK public certificate fingerprint does not match pinned NOVA Stable certificate."
             exit 1
           fi
+          echo "NOVA Stable APK signer matches the pinned owner certificate."
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
           mkdir -p release
           cp "$APK" release/NOVA-Stable.apk
