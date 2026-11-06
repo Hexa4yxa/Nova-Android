@@ -1,0 +1,35 @@
+name: NOVA - direct APK download from verified artifact
+on:
+  push:
+    branches: [delivery/nova-speed-test-download]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the already CI-verified test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download 42257512587 --repo "${{ github.repository }}" --name NOVA-NEW-FIXES-DEBUG-NOT-STABLE-UPDATE --dir apk
+          test -s apk/app-debug.apk
+          cp apk/app-debug.apk NOVA-New-Fixes-TEST.apk
+          sha256sum NOVA-New-Fixes-TEST.apk > SHA256SUMS.txt
+      - name: Publish direct browser download for Android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create nova-brains-speed-direct-2026-11-06 \
+            NOVA-New-Fixes-TEST.apk SHA256SUMS.txt \
+            --repo "${{ github.repository }}" \
+            --target 1039158d6eeb7f8be87c4d51eef52634f405a428 \
+            --title "NOVA - faster images & GGUF repair (experimental APK)" \
+            --notes "TEST ONLY: Android debug APK from a successfully completed CI run 42257512587. Separate test application, NOT the owner-signed NOVA Stable update. Do not uninstall or clear data of NOVA Stable; its models are not included in this APK." \
+            --latest=false
