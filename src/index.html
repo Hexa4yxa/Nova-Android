@@ -272,7 +272,9 @@ async function handleImageMessage(text,requestedPrompt){
      waiting.text=status;
      if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
    },size);
-   waiting.text='✅ NOVA создала изображение '+result.width+'×'+result.height+' в самой NOVA. Сохранено в Галерею → Pictures/NOVA.';
+   waiting.text='✅ NOVA создала изображение '+result.width+'×'+result.height+' в самой NOVA. Сохранено в Галерею → Pictures/NOVA.'+
+     (result.subject?'\n🎯 Объект: '+result.subject:'')+
+     (Number.isFinite(Number(result.samplingMs))?'\n⏱ Модель: '+Math.round(Number(result.modelLoadMs||0)/1000)+' с · рисование: '+(Number(result.samplingMs)/60000).toFixed(1)+' мин':'');
    waiting.preview=result.preview;
  }catch(error){
    waiting.text='⚠ Не удалось нарисовать: '+(error?.message||String(error));
@@ -864,7 +866,9 @@ function renderNovaImageStudio(initialPrompt=''){
    stop.disabled=false;
    try{
      const result=await executeImageGeneration(imagePromptDraft,msg=>{status.textContent=msg;},Number(sizeSelect.value),Number(stepsSelect.value));
-     status.textContent='✅ Готово! '+result.width+'×'+result.height+' · '+(result.elapsedSeconds||0)+' сек. Картинка сохранена в Галерею/Pictures/NOVA.';
+     status.textContent='✅ Готово! '+result.width+'×'+result.height+' · '+(result.elapsedSeconds||0)+' сек. Картинка сохранена в Галерею/Pictures/NOVA.'+
+       '\n⏱ Загрузка модели: '+(Number(result.modelLoadMs||0)/1000).toFixed(0)+' с · создание: '+(Number(result.samplingMs||0)/60000).toFixed(1)+' мин.'+
+       '\n📝 Описание, переданное SD 1.5: '+(result.promptUsed||'нет данных');
      const old=panel.querySelector('.nova-image-preview');
      old?.remove();
      const img=node(panel,'img','nova-image-preview');
