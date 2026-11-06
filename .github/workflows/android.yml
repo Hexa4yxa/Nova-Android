@@ -67,17 +67,13 @@ jobs:
         working-directory: android
         run: bash gradlew assembleDebug --no-daemon
 
-      - name: Upload NOVA APK
+      # This is a CI-only debug build signed with the runner's ephemeral key.
+      # It is not a safe update for an installed NOVA, and must never be
+      # published as a user-facing release. Permanent signed APKs come from
+      # nova-stable-release.yml after the owner sets a long-lived signing key.
+      - name: Upload debug APK for developer inspection only
         uses: actions/upload-artifact@v4
         with:
-          name: NOVA-AI-APK
+          name: NOVA-DEBUG-INSPECTION-ONLY-NOT-AN-UPDATE
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      - name: Publish NOVA Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/NOVA-debug.apk
-          gh release create "nova-build-${{ github.run_number }}" release/NOVA-debug.apk --title "NOVA Android #${{ github.run_number }}" --notes "Test APK for NOVA Android." --prerelease --target "${{ github.sha }}"
