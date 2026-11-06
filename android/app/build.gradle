@@ -29,9 +29,11 @@ android {
             def keystorePath = System.getenv('NOVA_STABLE_KEYSTORE_PATH')
             if (keystorePath != null && !keystorePath.isEmpty()) {
                 storeFile file(keystorePath)
-                storePassword System.getenv('NOVA_STABLE_STORE_PASSWORD')
-                keyAlias System.getenv('NOVA_STABLE_KEY_ALIAS')
-                keyPassword System.getenv('NOVA_STABLE_KEY_PASSWORD')
+                // Same persistent PKCS12 password for store and private key.
+                // Alias is fixed to prevent an accidental signer change.
+                storePassword System.getenv('NOVA_SIGNING_PASSWORD')
+                keyAlias 'nova-stable'
+                keyPassword System.getenv('NOVA_SIGNING_PASSWORD')
             }
         }
     }
