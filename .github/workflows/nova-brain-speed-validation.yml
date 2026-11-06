@@ -70,4 +70,12 @@ jobs:
       - name: Ensure image library exists in debug APK
         run: unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libnova-image.so'
 
+      - name: Upload unsigned-development APK for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-NEW-FIXES-DEBUG-NOT-STABLE-UPDATE
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
       # This workflow never signs or publishes a stable APK.
