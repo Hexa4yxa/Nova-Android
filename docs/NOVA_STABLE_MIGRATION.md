@@ -1,5 +1,28 @@
 # NOVA Stable: safe phone-only migration
 
+## Critical user instruction (November 6, 2026)
+
+**Do not install any GitHub Actions `app-debug.apk`, `NOVA-AI-APK`
+or old `NOVA-Native-Image-Test.apk` as an update.** These are experimental
+builds signed with disposable keys and Android will reject them with
+"conflicts with another package". They do not upgrade the installed NOVA.
+
+From this revision, CI development builds are labelled
+`NOVA-DEBUG-INSPECTION-ONLY-NOT-AN-UPDATE` and native-image releases are
+not auto-published. A one-time `NOVA-Stable.apk` will be offered only after
+the same owner-controlled signing key is configured and tested.
+
+The manual stable release workflow has been added to the **default branch**
+so GitHub can show its workflow_dispatch button; its branch guard still
+requires selecting the tested native-image branch, and without signing
+secrets it exits without releasing anything.
+
+**There is no cryptographic shortcut to updating an already installed APK
+signed by a key we do not possess.** The first transition must preserve
+the previous app until SD1.5, chat history and any other important data
+are safe. Future `.stable` APKs can update each other, provided the signing
+key is retained.
+
 ## Why we cannot replace the currently installed Native Image APK
 Early `ai.nova.director.nativeimage` APKs were signed with GitHub-hosted
 **ephemeral debug keys**. Android will not install a differently signed
