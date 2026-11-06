@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <stable-diffusion.h>
 #include <atomic>
+#include <chrono>
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -17,6 +18,8 @@ std::atomic<bool> is_running{false};
 std::atomic<bool> cancel_requested{false};
 std::atomic<int> completed_steps{0};
 std::atomic<int> total_steps{0};
+std::atomic<int64_t> latest_model_load_ms{0};
+std::atomic<int64_t> latest_sampling_ms{0};
 
 void throw_java(JNIEnv* env, const std::string& message) {
     jclass cls = env->FindClass("java/lang/IllegalStateException");
@@ -55,6 +58,8 @@ public:
         cancel_requested.store(false);
         completed_steps.store(0);
         total_steps.store(0);
+        latest_model_load_ms.store(0);
+        latest_sampling_ms.store(0);
     }
     ~RunningFlag() { is_running.store(false); }
 };
@@ -132,7 +137,10 @@ Java_ai_nova_image_NativeImageEngine_nativeGenerate(
         ctx_params.enable_mmap = true;
 
         sd_set_progress_callback(on_progress, nullptr);
+        const auto model_load_started = std::chrono::steady_clock::now();
         Context context(new_sd_ctx(&ctx_params));
+        latest_model_load_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - model_load_started).count());
         if (!context.get())
             throw std::runtime_error("Не удалось загрузить графическую модель: несовместимый файл или мало памяти");
         if (!sd_ctx_supports_image_generation(context.get()))
@@ -156,8 +164,11 @@ Java_ai_nova_image_NativeImageEngine_nativeGenerate(
         image_params.sample_params.scheduler = DISCRETE_SCHEDULER;
 
         Result result;
-        if (!generate_image(context.get(), &image_params, &result.value)
-            || !result.value || result.value->count < 1) {
+        const auto sample_started = std::chrono::steady_clock::now();
+        const bool generated = generate_image(context.get(), &image_params, &result.value);
+        latest_sampling_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - sample_started).count());
+        if (!generated || !result.value || result.value->count < 1) {
             throw std::runtime_error(cancel_requested.load() ?
                 "Генерация остановлена" :
                 "Генератор не создал изображение. Проверь модель и свободную память");
@@ -200,5 +211,17 @@ Java_ai_nova_image_NativeImageEngine_nativeProgress(
     jint values[2] = {completed_steps.load(), total_steps.load()};
     jintArray output = env->NewIntArray(2);
     if (output) env->SetIntArrayRegion(output, 0, 2, values);
+    return output;
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_ai_nova_image_NativeImageEngine_nativeTimings(
+    JNIEnv* env, jobject /*self*/) {
+    const jlong values[2] = {
+        static_cast<jlong>(latest_model_load_ms.load()),
+        static_cast<jlong>(latest_sampling_ms.load())
+    };
+    jlongArray output = env->NewLongArray(2);
+    if (output) env->SetLongArrayRegion(output, 0, 2, values);
     return output;
 }
