@@ -87,6 +87,7 @@ button:disabled{opacity:.45}
 </div>
 </div>
 <script src="nova_tool_registry.js"></script>
+<script src="nova_image_prompt_guard.js"></script>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
@@ -207,7 +208,11 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
      if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
     }
    }catch(e){console.warn('NOVA prompt planner: original description used',e);}
-   visualPrompt=imageEnhancedPrompt(visualPrompt).slice(0,590);
+   const promptGuard=window.NovaImagePromptGuard;
+   if(!promptGuard)throw new Error('Нет проверки описания картинки. Рисование остановлено без расхода времени.');
+   const prepared=promptGuard.prepare(prompt,visualPrompt);
+   visualPrompt=imageEnhancedPrompt(prepared.prompt).slice(0,590);
+   onProgress('🎯 Сюжет: '+(prepared.subject||visualPrompt.slice(0,90))+(prepared.fallback?' · проверенный перевод':''));
    onProgress('🧠 Освобождаю память для рисования...');
    await brain.releaseForImage();
    imageReserved=true;
@@ -224,6 +229,9 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
      size,steps
    });
    result.elapsedSeconds=Math.round((Date.now()-startedAt)/1000);
+   result.promptUsed=visualPrompt;
+   result.subject=prepared.subject||'';
+   result.translationFallback=prepared.fallback;
    imageLastResult=result;
    imagePromptDraft=prompt;
    return result;
