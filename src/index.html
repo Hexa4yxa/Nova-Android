@@ -198,18 +198,24 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
    const state=await bridge.status();
    if(!state.ready)throw new Error(state.detail||'Графическая модель не установлена в NOVA');
    if(!brain)throw new Error('Менеджер моделей NOVA недоступен.');
-   // Optional fully offline visual scene planning while the text brain is loaded.
-   // It never claims a finished image and falls back to the owner's wording.
-   let visualPrompt=prompt;
-   try{
-    if(brain.planImagePrompt){
-     onProgress('🎬 NOVA подготавливает описание сцены...');
-     const plan=await brain.planImagePrompt({prompt:prompt.slice(0,500)});
-     if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
-    }
-   }catch(e){console.warn('NOVA prompt planner: original description used',e);}
    const promptGuard=window.NovaImagePromptGuard;
    if(!promptGuard)throw new Error('Нет проверки описания картинки. Рисование остановлено без расхода времени.');
+   // Short subject names use a verified local translation; complex descriptions
+   // re-load Gemma if a previous image unloaded it. Never send raw Russian to SD1.5.
+   let visualPrompt=prompt;
+   const requiresTranslation=/[а-яёіїєґ]/iu.test(prompt) && !promptGuard.isBareSubject(prompt);
+   if(requiresTranslation && brain.planImagePrompt){
+    try{
+     const current=await brain.status();
+     if(current?.engine!=='ModelReady' && current?.selectedId && brain.prepare){
+      onProgress('🧠 Подключаю Gemma для точного перевода запроса...');
+      await brain.prepare();
+     }
+     onProgress('🎬 NOVA переводит описание сцены для SD 1.5...');
+     const plan=await brain.planImagePrompt({prompt:prompt.slice(0,500)});
+     if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
+    }catch(e){console.warn('NOVA prompt planner: verified translation was unavailable',e);}
+   }
    const prepared=promptGuard.prepare(prompt,visualPrompt);
    visualPrompt=imageEnhancedPrompt(prepared.prompt).slice(0,590);
    onProgress('🎯 Сюжет: '+(prepared.subject||visualPrompt.slice(0,90))+(prepared.fallback?' · проверенный перевод':''));
