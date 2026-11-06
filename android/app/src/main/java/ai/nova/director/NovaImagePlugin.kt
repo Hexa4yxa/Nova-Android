@@ -330,6 +330,7 @@ class NovaImagePlugin : Plugin() {
                     file.absolutePath, prompt, negative, size, steps, System.currentTimeMillis()
                 )
                 require(rgb.size == size * size * 3) { "Неполные пиксели изображения" }
+                val timing = NativeImageEngine.timings()
                 val pixels = NovaImagePixels.toArgb(rgb, size, size)
                 val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
                 try {
@@ -349,6 +350,8 @@ class NovaImagePlugin : Plugin() {
                         put("preview", "data:image/png;base64," +
                             Base64.encodeToString(png, Base64.NO_WRAP))
                         put("backend", "NOVA Native CPU")
+                        put("modelLoadMs", timing.getOrElse(0) { 0L })
+                        put("samplingMs", timing.getOrElse(1) { 0L })
                     })
                     prefs.edit().putString("last_success_model_id", selected())
                         .remove("last_error_model_id").remove("last_error").apply()
