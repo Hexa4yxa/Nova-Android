@@ -543,7 +543,7 @@ async function showBrainManager(){
     add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+
      (!valid?'ошибка формата (сохранён без удаления)':item.active?'подключена':item.selected?'выбрана для запуска':'доступна'));
     if(!valid){
-     add(row,'p','brain-caption','Файл не является корректной GGUF. Оставляем его без изменений.');
+     add(row,'p','brain-caption','Этот файл NOVA не запустит: неверный формат GGUF. Исходный файл сохранён.');
      continue;
     }
     if(!item.active){
