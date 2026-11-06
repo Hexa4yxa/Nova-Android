@@ -17,16 +17,21 @@ jobs:
   stable:
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm approved stable source branch
+      - name: Confirm approved manual release entrypoint
         shell: bash
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/feature/nova-native-image-engine" ]; then
-            echo "::error::Run only from the tested native-image branch until migration is approved."
+          if [ "$GITHUB_REF" != "refs/heads/main" ] && [ "$GITHUB_REF" != "refs/heads/feature/nova-native-image-engine" ]; then
+            echo "::error::Use main or the native-image branch for signed NOVA release."
             exit 1
           fi
 
-      - name: Checkout NOVA
+      # Deliberately build the exact revision that passed the full native
+      # image Kotlin/Android CI (#147) rather than arbitrary workflow branch.
+      # Update this SHA only after subsequent green integration CI.
+      - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
+        with:
+          ref: f24d25c4b99bf93884be0e362d06a1c0e621854f
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -142,7 +147,7 @@ jobs:
           gh release create "nova-stable-${{ github.run_number }}" release/NOVA-Stable.apk release/SHA256SUMS.txt \
             --title "NOVA Stable #${{ github.run_number }}" --prerelease \
             --notes "Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
-            --target "${{ github.sha }}"
+            --target "$(git rev-parse HEAD)"
 
       - name: Clean up signing file
         if: always()
