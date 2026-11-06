@@ -68,19 +68,26 @@ jobs:
       - name: Check that permanent signing secrets exist
         env:
           KEYSTORE_B64: ${{ secrets.NOVA_SIGNING_KEYSTORE_B64 }}
-          KEYSTORE_PASS: ${{ secrets.NOVA_SIGNING_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.NOVA_SIGNING_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.NOVA_SIGNING_KEY_PASSWORD }}
+          KEYSTORE_PASS: ${{ secrets.NOVA_SIGNING_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ]; then
             echo "::error::Stable signing is NOT configured. Do not uninstall the installed NOVA. Owner must add permanent signing key and GitHub secrets."
             exit 1
           fi
           umask 077
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nova-stable.jks"
-          test -s "$RUNNER_TEMP/nova-stable.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nova-stable.p12"
+          test -s "$RUNNER_TEMP/nova-stable.p12"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          SIGNER="$(keytool -list -v -storetype PKCS12 -alias nova-stable \
+            -keystore "$RUNNER_TEMP/nova-stable.p12" -storepass:env KEYSTORE_PASS \
+            | grep -m1 'SHA256:' | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':' | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          if [ "$SIGNER" != "$EXPECTED" ]; then
+            echo "::error::NOVA signing key differs from the pinned owner certificate. Refusing to publish an incompatible update."
+            exit 1
+          fi
+          echo "NOVA Stable signer verified against pinned public fingerprint."
 
       - name: Install dependencies and sync Capacitor
         run: |
@@ -98,10 +105,8 @@ jobs:
       - name: Kotlin tests and permanently signed stable APK
         working-directory: android
         env:
-          NOVA_STABLE_KEYSTORE_PATH: ${{ runner.temp }}/nova-stable.jks
-          NOVA_STABLE_STORE_PASSWORD: ${{ secrets.NOVA_SIGNING_STORE_PASSWORD }}
-          NOVA_STABLE_KEY_ALIAS: ${{ secrets.NOVA_SIGNING_KEY_ALIAS }}
-          NOVA_STABLE_KEY_PASSWORD: ${{ secrets.NOVA_SIGNING_KEY_PASSWORD }}
+          NOVA_STABLE_KEYSTORE_PATH: ${{ runner.temp }}/nova-stable.p12
+          NOVA_SIGNING_PASSWORD: ${{ secrets.NOVA_SIGNING_PASSWORD }}
         run: |
           bash gradlew testDebugUnitTest assembleRelease --no-daemon
 
@@ -116,6 +121,14 @@ jobs:
           test -x "$BUILD_TOOLS/apksigner"
           test -x "$BUILD_TOOLS/aapt"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          ACTUAL="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+            | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Signed APK fingerprint does not match pinned NOVA Stable certificate."
+            exit 1
+          fi
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
           mkdir -p release
           cp "$APK" release/NOVA-Stable.apk
@@ -133,4 +146,4 @@ jobs:
 
       - name: Clean up signing file
         if: always()
-        run: rm -f "$RUNNER_TEMP/nova-stable.jks"
+        run: rm -f "$RUNNER_TEMP/nova-stable.p12"
