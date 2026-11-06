@@ -58,9 +58,14 @@ test('stable packages have one permanent identity and require signing secrets',(
  assert.match(workflow,/workflow_dispatch/);
  assert.doesNotMatch(workflow,/\n\s*push:/);
  assert.match(workflow,/secrets\.NOVA_SIGNING_KEYSTORE_B64/);
- assert.match(workflow,/secrets\.NOVA_SIGNING_STORE_PASSWORD/);
- assert.match(workflow,/secrets\.NOVA_SIGNING_KEY_ALIAS/);
- assert.match(workflow,/secrets\.NOVA_SIGNING_KEY_PASSWORD/);
+ assert.match(workflow,/secrets\.NOVA_SIGNING_PASSWORD/);
+ assert.doesNotMatch(workflow,/secrets\.NOVA_SIGNING_STORE_PASSWORD/);
+ assert.doesNotMatch(workflow,/secrets\.NOVA_SIGNING_KEY_ALIAS/);
+ assert.doesNotMatch(workflow,/secrets\.NOVA_SIGNING_KEY_PASSWORD/);
+ assert.match(workflow,/NOVA_STABLE_CERT_SHA256\.txt/);
+ assert.match(workflow,/Signing key differs|signing key differs|signer.*verified/i);
+ const pin=read('android/signing/NOVA_STABLE_CERT_SHA256.txt').trim();
+ assert.match(pin,/^[0-9A-F]{64}$/);
  assert.match(workflow,/100000 \+ GITHUB_RUN_NUMBER/);
  assert.match(workflow,/app-release\.apk/);
  assert.match(workflow,/apksigner.*verify/);
