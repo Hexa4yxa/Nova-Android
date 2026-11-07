@@ -89,12 +89,14 @@ test('Portable story archive is offline, versioned, merge-only and idempotent',(
  restored.id='restored-extra-project';
  restored.scenes[0].imageUri='content://media/external/images/media/45';
  restored.scenes[0].renderSeconds=1472;
- const backup=JSON.stringify({format:'NOVA_STORIES_V1',version:1,stories:[existing,restored]});
+ const conflicting=Object.assign({},existing,{title:'НЕ ДОЛЖНО ЗАМЕНИТЬ ИСХОДНИК'});
+ const backup=JSON.stringify({format:'NOVA_STORIES_V1',version:1,stories:[conflicting,restored]});
  const merge=story.mergeBackup(backup);
  assert.equal(merge.added,1);
  assert.equal(merge.skipped,1);
  assert.equal(merge.total,2);
  assert.equal(story.read()[0].id,'existing-owner-project');
+ assert.equal(story.read()[0].title,existing.title);
  assert.equal(story.read()[1].scenes[0].renderSeconds,1472);
  assert.equal(story.mergeBackup(backup).added,0);
  const exported=JSON.parse(story.exportBackup());
