@@ -33,7 +33,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: c0d101a2fb4e22e27efc791a3ad02b8f8e0b23b8
+          ref: db3414aec776861dc02c82769649542d6ada8c0a
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
