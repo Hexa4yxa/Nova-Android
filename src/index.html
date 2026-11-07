@@ -175,7 +175,7 @@ function imageEnhancedPrompt(raw){
  if(anime||detailed)return raw.trim();
  return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
 }
-async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512,skipPlanning=false){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -192,7 +192,7 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
    // It never claims a finished image and falls back to the owner's wording.
    let visualPrompt=prompt;
    try{
-    if(brain.planImagePrompt){
+    if(!skipPlanning && brain.planImagePrompt){
      onProgress('🎬 NOVA подготавливает описание сцены...');
      const plan=await brain.planImagePrompt({prompt:prompt.slice(0,500)});
      if(plan?.optimized && typeof plan.prompt==='string')visualPrompt=plan.prompt;
@@ -241,6 +241,19 @@ function storyFramePrompts(story){
 }
 async function generateStoryFrames(story){
  const frames=storyFramePrompts(story);
+ // Plan every visual while the text model remains loaded.
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ const prepared=[];
+ for(const frame of frames){
+  let visual=frame;
+  if(brain?.planImagePrompt){
+   try{
+    const plan=await brain.planImagePrompt({prompt:frame.slice(0,500)});
+    if(plan?.optimized && typeof plan.prompt==='string')visual=plan.prompt;
+   }catch(e){console.warn('NOVA scene planning fallback',e);}
+  }
+  prepared.push(visual);
+ }
  const stopButton=document.getElementById('stop');
  const image=window.Capacitor?.Plugins?.NovaImage;
  let cancelled=false;
@@ -257,10 +270,10 @@ async function generateStoryFrames(story){
    history.push(message);
    if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
    try{
-    const result=await executeImageGeneration(frames[index],status=>{
+    const result=await executeImageGeneration(prepared[index],status=>{
      message.text='Кадр '+(index+1)+' из '+frames.length+': '+status;
      if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
-    },512);
+    },512,true);
     message.text='✅ Кадр '+(index+1)+' из '+frames.length+
      ' сохранён в Галерею → Pictures/NOVA.';
     message.preview=result.preview;completed++;
