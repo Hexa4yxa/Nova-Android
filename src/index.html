@@ -621,6 +621,9 @@ async function showBrainManager(){
      if(Number.isFinite(free)&&free>=0){
       add(resourceBox,'p','brain-caption','💾 Свободно RAM: '+Math.floor(free)+' МиБ. Перед рисованием NOVA освобождает память текстовой модели.');
      }
+     if(resources.gpuProbe){
+      add(resourceBox,'p','brain-caption','🧪 GPU: '+resources.gpuProbe+'. Пока генерация на CPU; это проверка доступности драйвера, не ускорение.');
+     }
      if(resources.resourceWarning){
       imageState.textContent+=' · ⚠ '+resources.resourceWarning;
      }
