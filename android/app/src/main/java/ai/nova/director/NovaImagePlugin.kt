@@ -389,6 +389,16 @@ class NovaImagePlugin : Plugin() {
             call.reject("GPU-тест запускается только после подтверждения")
             return
         }
+        // Real-device regression: Adreno 810 returned a flat white PNG and
+        // SystemUI became unresponsive. Stop *before* loading the OpenCL
+        // library, not only after image readback. CPU remains available.
+        val gpuDriver = NativeImageEngine.gpuProbe()
+        if (gpuDriver.contains("Adreno", ignoreCase = true) &&
+            Regex("""\b810\b""").containsMatchIn(gpuDriver)) {
+            call.reject("GPU-тест на Adreno 810 временно отключён после зависания Android. " +
+                "Используй безопасную генерацию CPU; модель и проекты сохранены.")
+            return
+        }
         val file = selected()?.let { find(it) }
         if (file == null) { call.reject("Сначала подключи SD 1.5"); return }
         if (!NativeGpuImageEngine.enableForApprovedTest()) {
@@ -437,6 +447,20 @@ class NovaImagePlugin : Plugin() {
                 val rgb = NativeGpuImageEngine.generate(file.absolutePath,
                     testPrompt, "blurry, watermark, text", 256, 1, 4242L)
                 require(rgb.size == 256 * 256 * 3) { "GPU не вернул полный RGB-кадр" }
+                // A completed sampler step is not evidence of a valid picture.
+                // Fail closed on entirely white/black/flat GPU readback, never
+                // save it as a successful GPU render or claim acceleration.
+                var minimum = 255
+                var maximum = 0
+                for (channel in rgb) {
+                    val value = channel.toInt() and 0xff
+                    if (value < minimum) minimum = value
+                    if (value > maximum) maximum = value
+                }
+                require(maximum - minimum >= 8) {
+                    "GPU вернул одноцветный кадр. OpenCL результат недействителен. " +
+                    "Не повторяй GPU-тест до проверки драйвера."
+                }
                 val timing = NativeGpuImageEngine.timings()
                 val pixels = NovaImagePixels.toArgb(rgb, 256, 256)
                 val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
