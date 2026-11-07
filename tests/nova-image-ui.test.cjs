@@ -53,8 +53,10 @@ test('quality path uses the actual offline image engine and optional LLM scene p
  assert.match(js,/await brain\.releaseForImage\(\)/);
  assert.ok(js.indexOf("brain.planImagePrompt({prompt:")<js.indexOf("brain.releaseForImage()"),
    'scene must be planned before unloading the text model');
- assert.match(js,/steps:size===256\?16:24/);
- assert.match(js,/size=512\)/);
+ assert.match(js,/size===256\?8:12/);
+ assert.match(js,/Number\(stepsSelect\.value\)/);
+ assert.match(js,/stepsSelect\.value='12'/);
+ assert.match(js,/size=512,stepCount=null\)/);
  assert.match(js,/sizeSelect\.value='512'/);
  assert.match(js,/imageNegativePrompt/);
  assert.match(js,/imageEnhancedPrompt/);

@@ -175,7 +175,7 @@ function imageEnhancedPrompt(raw){
  if(anime||detailed)return raw.trim();
  return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
 }
-async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCount=null){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -202,14 +202,19 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512){
    onProgress('🧠 Освобождаю память для рисования...');
    await brain.releaseForImage();
    imageReserved=true;
+   const startedAt=Date.now();
+   const steps=Number.isInteger(stepCount)?stepCount:(size===256?8:12);
    subscription=await bridge.addListener('novaImageProgress',e=>{
-     const total=e.total||20;
-     onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов. Работа офлайн.');
+     const total=e.total||steps;
+     const minutes=Math.floor((Date.now()-startedAt)/60000);
+     onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов · '+minutes+' мин. CPU, офлайн.');
    });
+   onProgress('🎨 Создаю изображение · '+size+'×'+size+' · '+steps+' шагов. Первый запуск может быть долгим.');
    const result=await bridge.generate({
      prompt:visualPrompt,negative:imageNegativePrompt(visualPrompt),
-     size,steps:size===256?16:24
+     size,steps
    });
+   result.elapsedSeconds=Math.round((Date.now()-startedAt)/1000);
    imageLastResult=result;
    imagePromptDraft=prompt;
    return result;
@@ -472,8 +477,8 @@ async function showBrainManager(){
   return el;
  };
  const llm=add(content,'section','panel');
- add(llm,'div','council-heading','🧠 Мозги NOVA · Автоматический выбор');
- add(llm,'p','tool-warning','Для разговора и режиссёрского совета NOVA использует выбранную GGUF. Для изображений — встроенный генератор NOVA. Все расчёты на телефоне. Новую модель нужно выбрать один раз.');
+ add(llm,'div','council-heading','🧠 Текстовые мозги · GGUF');
+ add(llm,'p','tool-warning','Для разговора и режиссёрского совета нужна исправная GGUF. Её можно скопировать в Загрузки → NOVA-Models через кнопку экспорта; рабочая копия останется внутри NOVA.');
  const llmState=add(llm,'p','small','Проверяю текстовые модели...');
  const modelsBox=add(llm,'div','');
  const importBtn=add(llm,'button','council-button','📥 Добавить GGUF с телефона');
@@ -501,15 +506,22 @@ async function showBrainManager(){
    const data=await brain.listModels();
    llmState.textContent=data.loading?'🟡 Загрузка модели...':
       data.ready?'✅ Текстовый мозг готов: '+data.engine:
-      'ℹ Модель в ожидании. NOVA загрузит выбранную GGUF перед разговором.';
+      'ℹ Текстовая модель не загружена. Выбери исправную GGUF.';
    const models=Array.isArray(data.models)?data.models:[];
    if(!models.length){
     add(modelsBox,'p','brain-caption','GGUF пока нет в этой установке NOVA. Нажми «Добавить GGUF» один раз.');
    }
    for(const item of models){
     const row=add(modelsBox,'div','brain-row');
-    add(row,'div','', (item.active?'✅ ':'')+(item.selected?'● ':'')+(item.name||'GGUF'));
-    add(row,'div','brain-caption', (Number(item.bytes)/1048576).toFixed(0)+' МБ · '+(item.active?'активна':item.selected?'выбрана для автозапуска':'доступна'));
+    const valid=item.valid!==false;
+    add(row,'div','',(valid?(item.active?'✅ ':''):'⚠ ')+
+      (item.selected?'● ':'')+(item.name||'GGUF'));
+    add(row,'div','brain-caption',(Number(item.bytes)/1048576).toFixed(0)+' МБ · '+
+      (!valid?'не GGUF или файл повреждён':item.active?'активна':item.selected?'выбрана для автозапуска':'доступна'));
+    if(!valid){
+     add(row,'p','brain-caption','Этот файл NOVA не запустит. Он остаётся на месте. Нажми «Добавить GGUF» и выбери исправный оригинал.');
+     continue;
+    }
     if(!item.active){
      const select=add(row,'button','','🧠 Подключить');
      select.disabled=data.loading;
@@ -520,6 +532,20 @@ async function showBrainManager(){
       catch(e){llmState.textContent='⚠ '+(e?.message||String(e));select.disabled=false;}
      };
     }
+    const exportBtn=add(row,'button','','📁 Скопировать в NOVA-Models');
+    exportBtn.disabled=data.loading;
+    exportBtn.onclick=async()=>{
+     exportBtn.disabled=true;
+     llmState.textContent='Выбери Загрузки → NOVA-Models и нажми «Сохранить». Копирование большой модели займёт время.';
+     try{
+      await brain.exportSavedModel({id:item.id});
+      llmState.textContent='✅ GGUF сохранена в выбранную папку. Исходная модель внутри NOVA не изменена.';
+     }catch(e){llmState.textContent='⚠ Экспорт: '+(e?.message||String(e));}
+     finally{exportBtn.disabled=false;}
+    };
+   }
+   if(models.length && models.every(item=>item.valid===false)){
+    llmState.textContent='⚠ Найден файл с неверным форматом GGUF. NOVA его не удалит. Нажми «Добавить GGUF» для восстановления текстового мозга.';
    }
   }catch(e){llmState.textContent='⚠ '+(e?.message||String(e));}
  }
@@ -733,11 +759,25 @@ function renderNovaImageStudio(initialPrompt=''){
   option.value=size;
  }
  sizeSelect.value='512';
+ const stepsSelect=node(panel,'select','tool-input');
+ stepsSelect.setAttribute('aria-label','Скорость и качество генерации');
+ for(const [steps,label] of [
+  ['8','⚡ Быстро · 8 шагов (черновик)'],
+  ['12','⚖️ Баланс · 12 шагов (рекомендуется)'],
+  ['24','💎 Качество · 24 шага (медленно, как раньше)']
+ ]){
+  const option=node(stepsSelect,'option','',label);
+  option.value=steps;
+ }
+ stepsSelect.value='12';
  const controls=node(panel,'div','tool-actions');
  const openDream=node(controls,'button','','📂 Добавить модель в NOVA');
  const check=node(controls,'button','','🔎 Проверить');
  const generate=node(controls,'button','','🎨 Создать 512×512');
- sizeSelect.onchange=()=>{generate.textContent='🎨 Создать '+sizeSelect.value+'×'+sizeSelect.value;};
+ sizeSelect.onchange=()=>{
+  stepsSelect.value=sizeSelect.value==='256'?'8':'12';
+  generate.textContent='🎨 Создать '+sizeSelect.value+'×'+sizeSelect.value;
+ };
  const stop=node(controls,'button','','■ Остановить');
  stop.disabled=!imageBusy;
  const status=node(panel,'div','small nova-image-status','Проверяю встроенный движок NOVA. CPU · Галерея/Pictures/NOVA.');
@@ -779,8 +819,8 @@ function renderNovaImageStudio(initialPrompt=''){
    generate.disabled=true;
    stop.disabled=false;
    try{
-     const result=await executeImageGeneration(imagePromptDraft,msg=>{status.textContent=msg;},Number(sizeSelect.value));
-     status.textContent='✅ Готово! '+result.width+'×'+result.height+'. Картинка сохранена в Галерею/Pictures/NOVA.';
+     const result=await executeImageGeneration(imagePromptDraft,msg=>{status.textContent=msg;},Number(sizeSelect.value),Number(stepsSelect.value));
+     status.textContent='✅ Готово! '+result.width+'×'+result.height+' · '+(result.elapsedSeconds||0)+' сек. Картинка сохранена в Галерею/Pictures/NOVA.';
      const old=panel.querySelector('.nova-image-preview');
      old?.remove();
      const img=node(panel,'img','nova-image-preview');
