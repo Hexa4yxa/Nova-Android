@@ -624,8 +624,10 @@ async function showBrainManager(){
      if(resources.gpuProbe){
       add(resourceBox,'p','brain-caption','🧪 GPU драйвер: '+resources.gpuProbe);
      }
-     if(resources.gpuEngineDevice){
-      add(resourceBox,'p','brain-caption','✅ SD OpenCL backend: '+resources.gpuEngineDevice+' · Пока генерация на CPU, GPU запускается только по нажатию.');
+     if(resources.gpuProbe && resources.gpuProbe.toLowerCase().includes('adreno')){
+      add(resourceBox,'p','brain-caption',resources.gpuEngineDevice?
+       '✅ SD OpenCL backend: '+resources.gpuEngineDevice+' · Обычная генерация остаётся на CPU.':
+       '🧪 OpenCL пока не запускался. Драйвер GPU загрузится только после твоего подтверждения теста.');
       add(imageToolsBox,'p','brain-caption','Один шаг — только короткая проверка OpenCL. PNG может выглядеть черновым; качество обычного рисования не меняется.');
       const gpuTest=add(imageToolsBox,'button','council-button','🧪 Испытать Adreno · 256×256 · 1 шаг');
       const gpuCancel=add(imageToolsBox,'button','council-button','⏹ Остановить GPU-тест');
