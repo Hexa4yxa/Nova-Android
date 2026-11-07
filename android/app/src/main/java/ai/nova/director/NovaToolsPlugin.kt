@@ -276,6 +276,118 @@ class NovaToolsPlugin : Plugin() {
         }
     }
 
+    /**
+     * Offline, owner-approved portable story archive. System document picker
+     * chooses the destination; NOVA never browses private folders by itself.
+     * The JSON contains story text and gallery URIs, not the image bytes.
+     */
+    @PluginMethod
+    fun exportStoryProjects(call: PluginCall) {
+        val data = call.getString("payload") ?: ""
+        if (data.toByteArray(Charsets.UTF_8).size > MAX_STORY_BACKUP_BYTES ||
+            !validStoryArchive(data)) {
+            call.reject("Резервная копия историй имеет неверный формат или слишком большая")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "NOVA-stories-backup.json")
+            }
+            startActivityForResult(call, intent, "storyExportSelected")
+        } catch (e: Exception) {
+            call.reject("Не удалось открыть выбор файла: ${e.message}", e)
+        }
+    }
+
+    @ActivityCallback
+    private fun storyExportSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            call.reject("Сохранение копии отменено")
+            return
+        }
+        val json = call.getString("payload") ?: ""
+        if (json.toByteArray(Charsets.UTF_8).size > MAX_STORY_BACKUP_BYTES ||
+            !validStoryArchive(json)) {
+            call.reject("Содержимое резервной копии изменилось или повреждено")
+            return
+        }
+        scope.launch {
+            try {
+                context.contentResolver.openOutputStream(uri, "w").use { output ->
+                    requireNotNull(output) { "Нет доступа к выбранному документу" }
+                    output.write(json.toByteArray(Charsets.UTF_8))
+                }
+                call.resolve(JSObject().apply { put("saved", true) })
+            } catch (e: Exception) {
+                call.reject("Не удалось записать истории: ${e.message}", e)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun importStoryProjects(call: PluginCall) {
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivityForResult(call, intent, "storyImportSelected")
+        } catch (e: Exception) {
+            call.reject("Не удалось выбрать резервную копию: ${e.message}", e)
+        }
+    }
+
+    @ActivityCallback
+    private fun storyImportSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            call.reject("Восстановление отменено")
+            return
+        }
+        scope.launch {
+            try {
+                val bytes = java.io.ByteArrayOutputStream()
+                context.contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Не удалось прочитать документ" }
+                    val block = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(block)
+                        if (count < 0) break
+                        if (bytes.size() + count > MAX_STORY_BACKUP_BYTES)
+                            error("Копия слишком большая: максимум 2 МиБ")
+                        bytes.write(block, 0, count)
+                    }
+                }
+                val data = bytes.toString(Charsets.UTF_8.name())
+                require(validStoryArchive(data)) {
+                    "Неверный формат. Выбери файл NOVA-stories-backup.json"
+                }
+                // Only return parsed JSON to the web UI. JS merges by id and
+                // never overwrites or deletes any existing owner project.
+                call.resolve(JSObject().apply { put("payload", data) })
+            } catch (e: Exception) {
+                call.reject("Невозможно восстановить истории: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun validStoryArchive(json: String): Boolean = try {
+        val archive = JSONObject(json)
+        archive.optString("format") == "NOVA_STORIES_V1" &&
+            archive.optInt("version") == 1 &&
+            archive.optJSONArray("stories") != null
+    } catch (_: Exception) {
+        false
+    }
+
+    private companion object {
+        const val MAX_STORY_BACKUP_BYTES = 2 * 1024 * 1024
+    }
+
     @PluginMethod
     fun cancelDownload(call: PluginCall) {
         val id = call.getString("id")?.toLongOrNull()
