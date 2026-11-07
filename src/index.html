@@ -88,6 +88,8 @@ button:disabled{opacity:.45}
 </div>
 <script src="nova_tool_registry.js"></script>
 <script src="nova_image_prompt_guard.js"></script>
+<script src="nova_story_director.js"></script>
+<script src="nova_story_ui.js"></script>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
@@ -449,6 +451,12 @@ document.querySelectorAll('nav span').forEach(tab=>{
   const selected=tab.dataset.tab;
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
+  if(selected==='projects')return window.NovaStoryUI.render({
+   content,
+   brain:window.Capacitor?.Plugins?.NovaBrain,
+   generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12),
+   isBusy:()=>busy||imageBusy
+  });
   if(selected==='council')return showCouncil();
    if(selected==='brains')return showBrainManager();
    if(selected==='tools')return showNovaTools();
