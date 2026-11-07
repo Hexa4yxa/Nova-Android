@@ -79,6 +79,57 @@ test('Invalid or Cyrillic image prompt does not launch an expensive SD render',(
  assert.throws(()=>story.parse('{"title":"hello"','Мистика'),/раскадровку|JSON/);
 });
 
+
+test('Portable story archive is offline, versioned, merge-only and idempotent',()=>{
+ const baseline=story.read();
+ const existing=story.parse(valid,'Существующая история');
+ existing.id='existing-owner-project';
+ assert.ok(story.write([existing]));
+ const restored=story.parse(valid,'Восстановленная история');
+ restored.id='restored-extra-project';
+ restored.scenes[0].imageUri='content://media/external/images/media/45';
+ restored.scenes[0].renderSeconds=1472;
+ const conflicting=Object.assign({},existing,{title:'НЕ ДОЛЖНО ЗАМЕНИТЬ ИСХОДНИК'});
+ const backup=JSON.stringify({format:'NOVA_STORIES_V1',version:1,stories:[conflicting,restored]});
+ const merge=story.mergeBackup(backup);
+ assert.equal(merge.added,1);
+ assert.equal(merge.skipped,1);
+ assert.equal(merge.total,2);
+ assert.equal(story.read()[0].id,'existing-owner-project');
+ assert.equal(story.read()[0].title,existing.title);
+ assert.equal(story.read()[1].scenes[0].renderSeconds,1472);
+ assert.equal(story.mergeBackup(backup).added,0);
+ const exported=JSON.parse(story.exportBackup());
+ assert.equal(exported.format,'NOVA_STORIES_V1');
+ assert.equal(exported.version,1);
+ assert.equal(exported.stories.length,2);
+ assert.equal(exported.stories[1].scenes[0].imageUri,'content://media/external/images/media/45');
+ assert.ok(story.write(baseline));
+});
+
+test('Invalid backup never replaces or deletes saved NOVA projects',()=>{
+ const before=JSON.stringify(story.read());
+ const bad=JSON.stringify({format:'NOVA_STORIES_V1',version:1,stories:[{id:'bad',title:'fake',scenes:[{beat:'x',prompt:42}]}]});
+ assert.throws(()=>story.mergeBackup(bad),/Неверный формат/);
+ assert.throws(()=>story.mergeBackup('not json'),/JSON/);
+ assert.equal(JSON.stringify(story.read()),before);
+});
+
+test('Native Android document picker and Projects UI offer safe backup/restore',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaToolsPlugin.kt','utf8');
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(native,/fun exportStoryProjects\(call: PluginCall\)/);
+ assert.match(native,/fun importStoryProjects\(call: PluginCall\)/);
+ assert.match(native,/Intent\.ACTION_CREATE_DOCUMENT/);
+ assert.match(native,/Intent\.ACTION_OPEN_DOCUMENT/);
+ assert.match(native,/MAX_STORY_BACKUP_BYTES/);
+ assert.match(ui,/archiveTools\.exportStoryProjects\(\{payload:director\.exportBackup\(\)\}\)/);
+ assert.match(ui,/director\.mergeBackup\(result\?\.payload\)/);
+ assert.match(ui,/💾 Сохранить копию историй/);
+ assert.match(ui,/♻️ Восстановить истории из копии/);
+ assert.doesNotThrow(()=>new vm.Script(ui));
+});
+
 test('Projects tab uses Gemma and requires user approval per image frame',()=>{
  const html=fs.readFileSync('src/index.html','utf8');
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
