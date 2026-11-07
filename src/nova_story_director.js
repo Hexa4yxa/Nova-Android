@@ -80,5 +80,46 @@ function write(stories) {
  try{localStorage.setItem(KEY,JSON.stringify(stories));return true}
  catch(_){return false}
 }
-root.NovaStoryDirector=Object.freeze({ideaRequest,parse,read,write});
+// A portable, offline backup. Keep the same project records so image URIs,
+// render durations, dates, generated prompts and scene edits survive restore.
+function exportBackup() {
+ return JSON.stringify({
+   format:'NOVA_STORIES_V1',version:1,
+   exportedAt:new Date().toISOString(),
+   stories:read()
+ });
+}
+function validBackupStory(item) {
+ return item && typeof item==='object' && !Array.isArray(item) &&
+   typeof item.id==='string' && item.id.length>0 && item.id.length<=180 &&
+   typeof item.title==='string' && item.title.length>0 &&
+   Array.isArray(item.scenes) && item.scenes.length>0 && item.scenes.length<=3 &&
+   item.scenes.every(scene=>scene && typeof scene==='object' &&
+     typeof scene.beat==='string' && typeof scene.prompt==='string' &&
+     scene.beat.length<=1000 && scene.prompt.length<=1500);
+}
+function mergeBackup(payload) {
+ let archive;
+ try{archive=JSON.parse(String(payload||''));}
+ catch(_){throw Error('Невозможно прочитать JSON резервной копии.');}
+ if(!archive || archive.format!=='NOVA_STORIES_V1' || archive.version!==1 ||
+    !Array.isArray(archive.stories) || archive.stories.length>2500 ||
+    !archive.stories.every(validBackupStory))
+   throw Error('Неверный формат копии NOVA. Ничего не изменено.');
+ const existing=read();
+ const seen=new Set(existing.map(item=>item.id));
+ const additions=[];
+ let skipped=0;
+ for(const item of archive.stories) {
+   if(seen.has(item.id)){skipped++;continue;}
+   seen.add(item.id);
+   additions.push(item);
+ }
+ // This is an all-or-nothing single storage write. Original projects stay
+ // untouched on a parse error, invalid data, or storage quota failure.
+ if(additions.length && !write(existing.concat(additions)))
+   throw Error('Мало памяти для восстановления. Старые истории не изменены.');
+ return {added:additions.length,skipped,total:existing.length+additions.length};
+}
+root.NovaStoryDirector=Object.freeze({ideaRequest,parse,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
