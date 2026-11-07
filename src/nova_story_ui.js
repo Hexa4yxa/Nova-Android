@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,idea:'',error:'',notice:''};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:''};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -17,6 +17,41 @@ function render(api) {
  const shell=node(content,'section','panel');
  node(shell,'div','council-heading','🎬 NOVA · Мои истории');
  node(shell,'p','small','Расскажи идею. Gemma сама создаст раскадровку и английские промпты. Истории сохраняются на телефоне. Каждый кадр запускается только с твоего разрешения.');
+
+ const archiveTools=root.Capacitor?.Plugins?.NovaTools;
+ const archiveBar=node(shell,'div','brain-row');
+ const exportBtn=node(archiveBar,'button','council-button','💾 Сохранить копию историй');
+ const importBtn=node(archiveBar,'button','council-button','♻️ Восстановить истории из копии');
+ const backupFeedback=node(archiveBar,'p','small',
+   state.backupMessage||'Копия сохраняет истории и промпты. Файлы PNG в Галерее остаются отдельно.');
+ const archiveDisabled=state.creating||state.drawing||state.backupBusy||isBusy();
+ exportBtn.disabled=archiveDisabled||!archiveTools||director.read().length===0;
+ importBtn.disabled=archiveDisabled||!archiveTools;
+ if(!archiveTools)backupFeedback.textContent='Архивирование недоступно в этой сборке NOVA.';
+ exportBtn.onclick=async()=>{
+  if(state.backupBusy||state.creating||state.drawing||isBusy()||!archiveTools)return;
+  state.backupBusy=true;exportBtn.disabled=true;importBtn.disabled=true;
+  backupFeedback.textContent='💾 Выбери место для файла резервной копии...';
+  try{
+   const result=await archiveTools.exportStoryProjects({payload:director.exportBackup()});
+   if(!result?.saved)throw Error('Android не подтвердил запись');
+   state.backupMessage='✅ Копия сохранена. Все истории в NOVA остались без изменений.';
+  }catch(e){state.backupMessage='⚠ Копия не сохранена: '+(e?.message||String(e));}
+  finally{state.backupBusy=false;render(api);}
+ };
+ importBtn.onclick=async()=>{
+  if(state.backupBusy||state.creating||state.drawing||isBusy()||!archiveTools)return;
+  if(!confirm('Выбрать резервную копию историй? NOVA добавит недостающие истории, не удаляя и не заменяя существующие.'))return;
+  state.backupBusy=true;exportBtn.disabled=true;importBtn.disabled=true;
+  backupFeedback.textContent='♻️ Выбери NOVA-stories-backup.json через Android...';
+  try{
+   const result=await archiveTools.importStoryProjects();
+   const merged=director.mergeBackup(result?.payload);
+   state.backupMessage='✅ Восстановлено: '+merged.added+
+     '. Уже были: '+merged.skipped+'. Всего историй: '+merged.total+'.';
+  }catch(e){state.backupMessage='⚠ Восстановление не выполнено: '+(e?.message||String(e));}
+  finally{state.backupBusy=false;render(api);}
+ };
  const editor=node(shell,'textarea','council-input');
  editor.placeholder='Например: герой возвращается домой, а отражение в старом зеркале начинает жить своей жизнью...';
  editor.maxLength=380;
