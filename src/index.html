@@ -626,7 +626,15 @@ async function showBrainManager(){
      }
      if(resources.gpuEngineDevice){
       add(resourceBox,'p','brain-caption','✅ SD OpenCL backend: '+resources.gpuEngineDevice+' · генерация пока по умолчанию CPU.');
+      add(imageToolsBox,'p','brain-caption','Один шаг — только короткая проверка OpenCL. PNG может выглядеть черновым; качество обычного рисования не меняется.');
       const gpuTest=add(imageToolsBox,'button','council-button','🧪 Испытать Adreno · 256×256 · 1 шаг');
+      const gpuCancel=add(imageToolsBox,'button','council-button','⏹ Остановить GPU-тест');
+      gpuCancel.disabled=true;
+      gpuCancel.onclick=async()=>{
+       gpuCancel.disabled=true;
+       imageTestStatus.textContent='⏹ Запрашиваю отмену GPU-теста...';
+       try{await image.cancel();}catch(e){imageTestStatus.textContent='⚠ Отмена: '+(e?.message||String(e));}
+      };
       gpuTest.disabled=!!(imageBusy||resources.generating);
       gpuTest.onclick=async()=>{
        if(imageBusy)return;
@@ -645,6 +653,7 @@ async function showBrainManager(){
          imageTestStatus.textContent='🎨 OpenCL GPU: '+(p.step||0)+' / '+(p.total||1)+' шаг';
         });
         imageTestStatus.textContent='🧪 Загружаю SD 1.5 на OpenCL GPU и выполняю один шаг...';
+        gpuCancel.disabled=false;
         const result=await image.gpuQuickTest({approved:true});
         imageTestStatus.textContent='✅ Реальная GPU-генерация завершилась! Загрузка модели: '+
           (Number(result.modelLoadMs||0)/1000).toFixed(1)+' с, вычисление: '+
@@ -663,6 +672,7 @@ async function showBrainManager(){
         if(reserved)try{await brain.finishImageWork();}catch(_){}
         imageBusy=false;
         gpuTest.disabled=false;
+        gpuCancel.disabled=true;
        }
       };
      }else{
