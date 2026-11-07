@@ -31,6 +31,10 @@ test('GPU native library requires a real registered OpenCL device and never masq
  assert.match(jni,/Java_ai_nova_image_NativeGpuImageEngine_nativeGpuDevice/);
  assert.match(gpu,/System\.loadLibrary\("nova-image-gpu"\)/);
  assert.match(gpu,/fun gpuDevice\(\): String/);
+ assert.match(gpu,/fun enableForApprovedTest\(\): Boolean/);
+ assert.match(plugin,/if \(!NativeGpuImageEngine\.enableForApprovedTest\(\)\)/);
+ assert.match(html,/Драйвер GPU загрузится только после твоего подтверждения теста/);
+ assert.doesNotMatch(gpu,/private val error: String\? = try/);
  assert.match(gpu,/require\(steps in 1\.\.30\)/);
  assert.match(plugin,/put\("gpuEngineDevice", NativeGpuImageEngine\.gpuDevice\(\)\)/);
 });
