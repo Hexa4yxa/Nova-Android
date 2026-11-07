@@ -9,6 +9,12 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- Android 12+ requires an explicit declaration for vendor OpenCL.
+             Optional: NOVA must also install and keep CPU rendering if the
+             phone has no public OpenCL runtime. -->
+        <uses-native-library android:name="libOpenCL.so"
+            android:required="false" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
