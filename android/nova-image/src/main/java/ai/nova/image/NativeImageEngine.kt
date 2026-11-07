@@ -37,6 +37,11 @@ object NativeImageEngine {
     /** Last completed or interrupted request: [model loading ms, sampling ms]. */
     fun timings(): LongArray = if (libraryReady()) nativeTimings() else longArrayOf(0L, 0L)
 
+    /** Diagnostic only. Detecting an OpenCL driver does not enable or promise GPU acceleration. */
+    fun gpuProbe(): String = if (libraryReady()) try { nativeGpuProbe() } catch (_: Throwable) {
+        "OpenCL-проверка недоступна"
+    } else "Графический движок ещё не загружен"
+
     fun cancel(): Boolean = libraryReady() && nativeCancel()
     fun progress(): IntArray = if (libraryReady()) nativeProgress() else intArrayOf(0, 0)
     private external fun nativeGenerate(
@@ -44,6 +49,7 @@ object NativeImageEngine {
         size: Int, steps: Int, seed: Long
     ): ByteArray
     private external fun nativeTimings(): LongArray
+    private external fun nativeGpuProbe(): String
     private external fun nativeCancel(): Boolean
     private external fun nativeProgress(): IntArray
 }
