@@ -33,7 +33,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: 0740da3fa441e3b639d7e559a813078bab1971fc
+          ref: 583c621b9e7109a69b7eedacedae9aa060e40877
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -194,7 +194,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "First-time migration from debug NOVA 1.0.1-nativeimage: this Stable APK has a separate app ID and does not overwrite the old installation. Preserve the old app until Gemma and SD1.5 are imported from Download/NOVA-Models and tested. Future Official Stable versions update in place. Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). Experimental opt-in Adreno GPU smoke test (256x256, one step) is separate: regular image generation remains on CPU until real phone validation. No GPU speedup is claimed. DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
+            --notes "NOVA Official Stable #6 upgrades the SAME owner-signed Android package ai.nova.director.stable in place. Do not uninstall previous Stable or clear app data: imported SD1.5, Gemma, projects and gallery pictures must be kept. Upgrades: preserve all story projects instead of last six, shot-first cinematic prompts, and offline story JSON backup/import through Android document picker. CPU drawing remains unchanged. The real-device Adreno 810 OpenCL GPU test is blocked after a blank output and SystemUI hang; do not attempt GPU trials until validated. Signed with the existing pinned owner certificate; automatically checked by CI before release." \\
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
