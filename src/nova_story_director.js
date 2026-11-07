@@ -18,7 +18,7 @@ function ideaRequest(idea,count=3) {
   'Preserve user-mentioned objects, architecture, geography and spatial relations in the relevant scenes. Do not replace them with generic scenery.',
   'Place the actual scene subject and setting BEFORE decorative style or character-consistency notes so SD 1.5 sees them first.',
   'Each scene changes an action while preserving person, outfit, era, atmosphere.',
-  'Keep each scene prompt within 45-55 English words. SD 1.5 has a limited text context; key details must come first. No self-references or imaginary image output.',
+  'Keep each scene prompt within 25-38 English words. Put essential visible details first for SD 1.5 and fit three concise scenes into one local JSON reply. No self-references or imaginary image output.',
   'Do not describe actual violence or pornography. No explanations outside JSON.'
  ].join('\n');
 }
