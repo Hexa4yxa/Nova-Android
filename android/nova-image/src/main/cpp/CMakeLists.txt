@@ -35,8 +35,17 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${SD_SRC}" "${CMAKE_CURRENT_BINARY_DIR}/sd" EXCLUDE_FROM_ALL)
 
-add_library(nova-image SHARED nova_image_jni.cpp nova_gpu_probe.cpp)
-target_include_directories(nova-image PRIVATE "${SD_SRC}/include")
-target_link_libraries(nova-image PRIVATE stable-diffusion android log dl)
-target_compile_options(nova-image PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
-target_link_options(nova-image PRIVATE "LINKER:--exclude-libs,ALL")
+# Two independent libraries: the signed NOVA keeps its original CPU renderer.
+# The optional OpenCL library is probed/loaded only upon explicit GPU trial.
+if(NOVA_EXPERIMENTAL_OPENCL)
+    add_library(nova-image-gpu SHARED nova_image_jni.cpp)
+    target_compile_definitions(nova-image-gpu PRIVATE NOVA_GPU_IMAGE_BACKEND=1)
+    set(NOVA_IMAGE_TARGET nova-image-gpu)
+else()
+    add_library(nova-image SHARED nova_image_jni.cpp nova_gpu_probe.cpp)
+    set(NOVA_IMAGE_TARGET nova-image)
+endif()
+target_include_directories(${NOVA_IMAGE_TARGET} PRIVATE "${SD_SRC}/include")
+target_link_libraries(${NOVA_IMAGE_TARGET} PRIVATE stable-diffusion android log dl)
+target_compile_options(${NOVA_IMAGE_TARGET} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_link_options(${NOVA_IMAGE_TARGET} PRIVATE "LINKER:--exclude-libs,ALL")
