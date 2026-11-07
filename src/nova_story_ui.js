@@ -72,7 +72,7 @@ function render(api) {
    // The text model can be unloaded by SD1.5 to save memory.
    const status=await brain.status();
    if(status.engine!=='ModelReady')await brain.prepare();
-   const response=await brain.chat({message:question});
+   const response=await brain.chat({message:question,maxTokens:512});
    const story=director.parse(response?.answer,state.idea);
    const saved=director.read();
    saved.push(story);

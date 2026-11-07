@@ -626,10 +626,12 @@ class NovaBrainPlugin : Plugin() {
         }
         stopRequested.set(false)
         val requestId = call.getString("requestId") ?: UUID.randomUUID().toString()
+        // Storyboarding may need up to 512 tokens. Keep ordinary chat at 256.
+        val maxTokens = (call.getInt("maxTokens") ?: 256).coerceIn(32, 512)
 
         scope.launch {
             try {
-                val answer = brain.chat(message) { token ->
+                val answer = brain.chat(message, maxTokens) { token ->
                     val update = JSObject()
                     update.put("requestId", requestId)
                     update.put("token", token)

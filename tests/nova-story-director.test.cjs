@@ -140,7 +140,7 @@ test('Projects tab uses Gemma and requires user approval per image frame',()=>{
  assert.match(html,/<script src="nova_story_director\.js"><\/script>\s*<script src="nova_story_ui\.js"><\/script>/);
  assert.match(main,/if\(selected==='projects'\)return window\.NovaStoryUI\.render/);
  assert.match(ui,/await brain\.prepare\(\)/);
- assert.match(ui,/await brain\.chat\(\{message:question\}\)/);
+ assert.match(ui,/await brain\.chat\(\{message:question,maxTokens:512\}\)/);
  assert.match(ui,/confirm\('Нарисовать сцену /);
  assert.match(ui,/await generate\(scene\.prompt/);
  assert.match(ui,/director\.write/);
