@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nova-adreno-dual-renderer
+  group: nova-adreno-dual-renderer-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   compile-dual-engine:
