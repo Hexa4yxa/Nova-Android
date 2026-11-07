@@ -40,5 +40,5 @@ test('OpenCL remains isolated as experimental GPU build without a new Android ap
  assert.match(gradle,/OpenCL_INCLUDE_DIR/);
  assert.match(gradle,/OpenCL_LIBRARY/);
  assert.match(cmake,/nova_gpu_probe\.cpp/);
- assert.match(cmake,/target_link_libraries\(nova-image PRIVATE stable-diffusion android log dl\)/);
+ assert.match(cmake,/target_link_libraries\(\$\{NOVA_IMAGE_TARGET\} PRIVATE stable-diffusion android log dl\)/);
 });
