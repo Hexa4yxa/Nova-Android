@@ -194,7 +194,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable #6 upgrades the SAME owner-signed Android package ai.nova.director.stable in place. Do not uninstall previous Stable or clear app data: imported SD1.5, Gemma, projects and gallery pictures must be kept. Upgrades: preserve all story projects instead of last six, shot-first cinematic prompts, and offline story JSON backup/import through Android document picker. CPU drawing remains unchanged. The real-device Adreno 810 OpenCL GPU test is blocked after a blank output and SystemUI hang; do not attempt GPU trials until validated. Signed with the existing pinned owner certificate; automatically checked by CI before release." \\
+            --notes "NOVA Official Stable #6 upgrades the SAME owner-signed Android package ai.nova.director.stable in place. Do not uninstall previous Stable or clear app data: imported SD1.5, Gemma, projects and gallery pictures must be kept. Upgrades: preserve all story projects instead of last six, shot-first cinematic prompts, and offline story JSON backup/import through Android document picker. CPU drawing remains unchanged. The real-device Adreno 810 OpenCL GPU test is blocked after a blank output and SystemUI hang; do not attempt GPU trials until validated. Signed with the existing pinned owner certificate; automatically checked by CI before release." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
