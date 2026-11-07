@@ -462,9 +462,10 @@ class NovaImagePlugin : Plugin() {
                         put("samplingMs", timing.getOrElse(1) { 0L })
                     })
                 } finally { bitmap.recycle() }
-            } catch (e: Exception) {
-                // CPU remains untouched: error returns to UI for diagnosis.
-                call.reject("OpenCL тест не завершён: " + (e.message ?: e.javaClass.simpleName), e)
+            } catch (e: Throwable) {
+                // Even a JNI linkage error should be reported without changing CPU renderer.
+                val cause = if (e is Exception) e else IllegalStateException(e)
+                call.reject("OpenCL тест не завершён: " + (e.message ?: e.javaClass.simpleName), cause)
             } finally {
                 generating.set(false)
                 monitor.cancel()
@@ -503,8 +504,10 @@ class NovaImagePlugin : Plugin() {
 
     @PluginMethod
     fun cancel(call: PluginCall) {
+        val cpuCancelled = NativeImageEngine.cancel()
+        val gpuCancelled = NativeGpuImageEngine.cancel()
         call.resolve(JSObject().apply {
-            put("cancelRequested", NativeImageEngine.cancel() || NativeGpuImageEngine.cancel())
+            put("cancelRequested", cpuCancelled || gpuCancelled)
         })
     }
 
