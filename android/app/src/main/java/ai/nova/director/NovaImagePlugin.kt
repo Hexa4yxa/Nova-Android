@@ -385,7 +385,7 @@ class NovaImagePlugin : Plugin() {
      */
     @PluginMethod
     fun gpuQuickTest(call: PluginCall) {
-        if (!call.getBoolean("approved", false)) {
+        if (call.getBoolean("approved", false) != true) {
             call.reject("GPU-тест запускается только после подтверждения")
             return
         }
