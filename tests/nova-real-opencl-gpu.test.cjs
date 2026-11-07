@@ -55,6 +55,14 @@ test('Adreno quick test is opt-in, 256px, single step, same existing model',()=>
  assert.doesNotThrow(()=>new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)?.[1]));
 });
 
+test('reject solid white GPU readback before claiming success or saving PNG',()=>{
+ const gpuTrial=plugin.slice(plugin.indexOf('fun gpuQuickTest('),plugin.indexOf('private fun savePng('));
+ assert.match(gpuTrial,/for \\(channel in rgb\\)/);
+ assert.match(gpuTrial,/require\\(maximum - minimum >= 8\\)/);
+ assert.match(gpuTrial,/GPU вернул одноцветный кадр/);
+ assert.ok(gpuTrial.indexOf('require(maximum - minimum >= 8)') < gpuTrial.indexOf('val bitmap = Bitmap.createBitmap'));
+});
+
 test('GPU staging intentionally omits Khronos ICD loader and separate APKs',()=>{
  assert.match(build,/target nova-image-gpu --parallel 2/);
  assert.match(build,/STAGING=".*android\/app\/src\/main\/jniLibs\/arm64-v8a"/);
