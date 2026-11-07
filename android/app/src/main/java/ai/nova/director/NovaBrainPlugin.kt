@@ -116,6 +116,49 @@ class NovaBrainPlugin : Plugin() {
         }
     }
 
+    /**
+     * Free the text GGUF before heavy CPU image generation.
+     * Selected model stays on disk and is reloaded by prepare() on the next chat.
+     */
+    @PluginMethod
+    fun releaseForImage(call: PluginCall) {
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            call.reject("Сначала заверши разговор или режиссёрский совет")
+            return
+        }
+        if (!NovaComputeGate.reserveImage()) {
+            modelLoading.set(false)
+            call.reject("NOVA уже выполняет другую задачу. Дождись завершения.")
+            return
+        }
+        scope.launch {
+            var released = false
+            try {
+                if (brain.state() == "ModelReady" || brain.state() == "Error") {
+                    brain.unloadModel()
+                }
+                activeModelId = ""
+                released = true
+                call.resolve(JSObject().apply { put("released", true) })
+            } catch (e: Exception) {
+                call.reject("Не удалось освободить память: " + e.message, e)
+            } finally {
+                if (!released) NovaComputeGate.releaseUnusedImage()
+                modelLoading.set(false)
+            }
+        }
+    }
+
+    /**
+     * Release reservation if the web UI fails before starting native inference.
+     * Never unlock memory while a native image job is still running.
+     */
+    @PluginMethod
+    fun finishImageWork(call: PluginCall) {
+        val released = NovaComputeGate.releaseUnusedImage()
+        call.resolve(JSObject().apply { put("released", released) })
+    }
+
     @PluginMethod
     fun listModels(call: PluginCall) {
         try {
@@ -160,7 +203,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Эта GGUF пока не импортирована в NOVA")
             return
         }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA рисует изображение. Текстовая модель подождёт.")
+            return
+        }
         if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("Сначала заверши текущую задачу NOVA")
             return
         }
@@ -176,13 +224,19 @@ class NovaBrainPlugin : Plugin() {
                 call.reject("Не удалось подключить модель: " + e.message, e)
             } finally {
                 modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
 
     @PluginMethod
     fun importAdditionalModel(call: PluginCall) {
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Графический мозг занят. Импорт GGUF начнём после него.")
+            return
+        }
         if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("Сначала заверши текущую задачу")
             return
         }
@@ -194,6 +248,7 @@ class NovaBrainPlugin : Plugin() {
             startActivityForResult(call, intent, "additionalModelSelected")
         } catch (e: Exception) {
             modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Не удалось открыть выбор файла: " + e.message, e)
         }
     }
@@ -203,6 +258,7 @@ class NovaBrainPlugin : Plugin() {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
             modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Выбор модели отменён")
             return
         }
@@ -243,40 +299,62 @@ class NovaBrainPlugin : Plugin() {
             } finally {
                 temp?.delete()
                 modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
 
     @PluginMethod
     fun prepare(call: PluginCall) {
-        if (brain.state() == "ModelReady") {
-            call.resolve(JSObject().apply {
-                put("loaded", true)
-                put("model", brain.modelInfo())
-            })
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Сначала дождись окончания генерации картинки")
             return
         }
-        val id = selectedModelId()
-        if (id == null) {
-            // No model imported: Android file picker requires one explicit action.
-            importModel(call)
-            return
-        }
-        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
-            call.reject("NOVA уже загружает модель или выполняет задачу")
-            return
-        }
-        scope.launch {
-            try {
-                activateModel(id)
+        var gatePassedToWorker = false
+        var gateReleasedForPicker = false
+        var loaderAcquired = false
+        try {
+            if (brain.state() == "ModelReady") {
                 call.resolve(JSObject().apply {
                     put("loaded", true)
                     put("model", brain.modelInfo())
                 })
-            } catch (e: Exception) {
-                call.reject("Ошибка запуска модели: " + e.message, e)
-            } finally {
-                modelLoading.set(false)
+                return
+            }
+            val id = selectedModelId()
+            if (id == null) {
+                // The picker acquires its own admission lock.
+                NovaComputeGate.leaveText()
+                gateReleasedForPicker = true
+                importModel(call)
+                return
+            }
+            if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+                call.reject("NOVA уже загружает модель или выполняет задачу")
+                return
+            }
+            loaderAcquired = true
+            scope.launch {
+                try {
+                    activateModel(id)
+                    call.resolve(JSObject().apply {
+                        put("loaded", true)
+                        put("model", brain.modelInfo())
+                    })
+                } catch (e: Exception) {
+                    call.reject("Ошибка запуска модели: " + e.message, e)
+                } finally {
+                    modelLoading.set(false)
+                    NovaComputeGate.leaveText()
+                }
+            }
+            gatePassedToWorker = true
+        } catch (e: Exception) {
+            if (loaderAcquired && !gatePassedToWorker) modelLoading.set(false)
+            call.reject("Не удалось подготовить текстовую модель: " + e.message, e)
+        } finally {
+            if (!gatePassedToWorker && !gateReleasedForPicker) {
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -301,17 +379,34 @@ class NovaBrainPlugin : Plugin() {
 
     @PluginMethod
     fun importModel(call: PluginCall) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            type = "*/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA генерирует картинку. Импорт GGUF сейчас недоступен.")
+            return
         }
-        startActivityForResult(call, intent, "modelSelected")
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.reject("NOVA уже загружает модель или выполняет задачу")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(call, intent, "modelSelected")
+        } catch (e: Exception) {
+            modelLoading.set(false)
+            NovaComputeGate.leaveText()
+            call.reject("Не удалось открыть выбор модели: " + e.message, e)
+        }
     }
 
     @ActivityCallback
     private fun modelSelected(call: PluginCall, result: ActivityResult) {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            modelLoading.set(false)
+            NovaComputeGate.leaveText()
             call.reject("Выбор модели отменён")
             return
         }
@@ -346,6 +441,9 @@ class NovaBrainPlugin : Plugin() {
                 call.resolve(response)
             } catch (e: Exception) {
                 call.reject("Ошибка импорта модели: " + e.toString(), e)
+            } finally {
+                modelLoading.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -357,7 +455,15 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Model path required")
             return
         }
-
+        if (!NovaComputeGate.enterText()) {
+            call.reject("Дождись завершения генерации изображения.")
+            return
+        }
+        if (generating.get() || !modelLoading.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.reject("NOVA уже выполняет другую задачу")
+            return
+        }
         scope.launch {
             try {
                 brain.loadModel(path)
@@ -366,6 +472,68 @@ class NovaBrainPlugin : Plugin() {
                 call.resolve(result)
             } catch (e: Exception) {
                 call.reject("Model loading failed", e)
+            } finally {
+                modelLoading.set(false)
+                NovaComputeGate.leaveText()
+            }
+        }
+    }
+
+    /**
+     * Optional offline prompt planner: translate a user-described image to
+     * precise English SD1.5 text before releasing the loaded Gemma model.
+     * It does not generate or claim a picture; native NovaImage does that.
+     */
+    @PluginMethod
+    fun planImagePrompt(call: PluginCall) {
+        val raw = call.getString("prompt")?.trim().orEmpty()
+        if (raw.length !in 3..500) {
+            call.reject("Опиши изображение (3–500 символов)")
+            return
+        }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас создаёт изображение")
+            return
+        }
+        if (generating.get() || modelLoading.get() ||
+            brain.state() != "ModelReady" ||
+            !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
+            call.resolve(JSObject().apply {
+                put("prompt", raw)
+                put("optimized", false)
+            })
+            return
+        }
+        scope.launch {
+            try {
+                val instruction = """
+                    Convert this visual description to ONE English prompt for
+                    a photorealistic Stable Diffusion image.
+                    Preserve the requested subject, clothing, setting and action.
+                    Do not change nationality or add unrequested symbols.
+                    Use concise photographic detail, realistic natural colors,
+                    accurate anatomy and cinematic lighting.
+                    Output ONE English line only; no commentary, no markdown.
+                    Description: ${raw.take(500)}
+                    English prompt:
+                """.trimIndent()
+                val answer = brain.chat(instruction, 160) { _ -> }
+                    .trim().trim('"', '\'', '\n')
+                    .lineSequence().firstOrNull()?.trim().orEmpty()
+                    .removePrefix("English prompt:").trim()
+                val latin = answer.count { it in 'a'..'z' || it in 'A'..'Z' }
+                val safe = answer.length in 20..540 && latin >= 20 &&
+                    !answer.contains("markdown") && !answer.startsWith("I ")
+                call.resolve(JSObject().apply {
+                    put("prompt", if (safe) answer.take(540) else raw)
+                    put("optimized", safe)
+                })
+            } catch (_: Exception) {
+                call.resolve(JSObject().apply { put("prompt", raw); put("optimized", false) })
+            } finally {
+                generating.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -377,7 +545,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Message required")
             return
         }
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас генерирует изображение. Дождись завершения.")
+            return
+        }
         if (modelLoading.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("NOVA is already generating a reply")
             return
         }
@@ -399,6 +572,7 @@ class NovaBrainPlugin : Plugin() {
                 call.reject("NOVA chat failed: " + (e.message ?: e.javaClass.simpleName), e)
             } finally {
                 generating.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }
@@ -415,7 +589,12 @@ class NovaBrainPlugin : Plugin() {
             call.reject("Задача должна содержать от 1 до 1200 символов")
             return
         }
-        if (!generating.compareAndSet(false, true)) {
+        if (!NovaComputeGate.enterText()) {
+            call.reject("NOVA сейчас рисует изображение. Совет подождёт.")
+            return
+        }
+        if (modelLoading.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.leaveText()
             call.reject("NOVA уже выполняет другую задачу")
             return
         }
@@ -477,6 +656,7 @@ class NovaBrainPlugin : Plugin() {
             } finally {
                 councilPhase = ""
                 generating.set(false)
+                NovaComputeGate.leaveText()
             }
         }
     }

@@ -1,9 +1,14 @@
 name: NOVA Android APK
 
+# Keep only the most recent code revision building on each development branch.
+concurrency:
+  group: nova-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads, feature/nova-local-image-tools, feature/nova-image-hardening, feature/nova-brains-auto]
+    branches: [main, fix/nova-streaming-android, experiment/nova-gemma, feature/nova-director-council, feature/nova-tools-approved-downloads, feature/nova-local-image-tools, feature/nova-image-hardening, feature/nova-brains-auto, feature/nova-native-image-engine]
 
 jobs:
   build:
@@ -21,6 +26,16 @@ jobs:
           repository: ggml-org/llama.cpp
           ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
           path: llama.cpp
+
+      - name: Checkout pinned native image engine
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
 
       - name: Java 21
         uses: actions/setup-java@v4
@@ -64,23 +79,71 @@ jobs:
         run: npx cap sync android
 
       - name: Check Director Council UI syntax and wiring
-        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads' || github.ref == 'refs/heads/feature/nova-local-image-tools' || github.ref == 'refs/heads/feature/nova-image-hardening' || github.ref == 'refs/heads/feature/nova-brains-auto'
+        if: github.ref == 'refs/heads/feature/nova-director-council' || github.ref == 'refs/heads/feature/nova-tools-approved-downloads' || github.ref == 'refs/heads/feature/nova-local-image-tools' || github.ref == 'refs/heads/feature/nova-image-hardening' || github.ref == 'refs/heads/feature/nova-brains-auto' || github.ref == 'refs/heads/feature/nova-native-image-engine'
         run: |
           node --test tests/council-ui.test.cjs
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ]; then node --test tests/nova-tools-ui.test.cjs; fi
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ]; then node --test tests/nova-image-ui.test.cjs; fi
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ]; then node --test tests/nova-brains-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-tools-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-image-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-brains-ui.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-native-image.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-tool-registry.test.cjs; fi
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then node --test tests/nova-model-recovery.test.cjs; fi
 
       - name: Build APK and run Kotlin unit tests
         working-directory: android
         run: |
-          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ]; then
+          if [ "$GITHUB_REF" = 'refs/heads/feature/nova-director-council' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-tools-approved-downloads' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-local-image-tools' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-image-hardening' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-brains-auto' ] || [ "$GITHUB_REF" = 'refs/heads/feature/nova-native-image-engine' ]; then
             bash gradlew testDebugUnitTest assembleDebug --no-daemon
           else
             bash gradlew assembleDebug --no-daemon
           fi
 
-      - name: Upload NOVA APK
+      - name: Verify native image engine is packaged
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        run: |
+          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libnova-image.so'
+          echo 'Native image engine included; real generation requires a compatible model and on-device verification.'
+
+      # Prove the *release* build path compiles before asking the owner to
+      # configure secrets. Sign this disposable APK with a temporary key and
+      # NEVER publish or upload it: it must not become the stable signer.
+      - name: Smoke-test Stable release package with throwaway CI signer
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NOVA_SIGNING_PASSWORD="$(openssl rand -hex 24)"
+          export NOVA_STABLE_KEYSTORE_PATH="$RUNNER_TEMP/nova-throwaway-ci.p12"
+          export NOVA_STABLE_VERSION_CODE=100001
+          keytool -genkeypair -alias nova-stable -keyalg RSA -keysize 2048 \
+            -validity 1 -storetype PKCS12 \
+            -keystore "$NOVA_STABLE_KEYSTORE_PATH" \
+            -storepass:env NOVA_SIGNING_PASSWORD -keypass:env NOVA_SIGNING_PASSWORD \
+            -dname "CN=NOVA Throwaway CI Test" -noprompt >/dev/null
+          bash gradlew assembleRelease --no-daemon
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+          rm -f "$NOVA_STABLE_KEYSTORE_PATH" "$APK"
+          echo "Release build/package smoke test passed. No real stable APK was published."
+
+      # Debug APKs from disposable GitHub-runner keys CANNOT update the existing
+      # NOVA native-image install. Do not publish them as user-facing releases.
+      # Keep CI artifact solely for developer inspection.
+      - name: Upload non-installable CI debug artifact for native-image branch
+        if: github.ref == 'refs/heads/feature/nova-native-image-engine'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-DEBUG-INSPECTION-ONLY-NOT-AN-UPDATE
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload NOVA debug APK for other experiment branches
+        if: github.ref != 'refs/heads/feature/nova-native-image-engine'
         uses: actions/upload-artifact@v4
         with:
           name: NOVA-AI-APK

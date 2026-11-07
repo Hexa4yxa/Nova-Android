@@ -1,291 +1,276 @@
 package ai.nova.director
 
+import ai.nova.image.NativeImageEngine
+import android.app.Activity
+import android.app.ActivityManager
+import android.content.Context
+import android.os.PowerManager
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
+import android.os.StatFs
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
-import org.json.JSONObject
-import org.json.JSONArray
-import java.io.BufferedReader
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.Proxy
-import java.net.URL
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Controls an existing, explicitly started Local Dream instance on the SAME phone.
- * It never downloads models and cannot connect to a user-supplied host or URL.
- * Local Dream must be open with an already loaded model; 8081 must not be used by
- * the older NOVA video server.
- *
- * Local Dream API: POST /tokenize; POST /generate -> SSE with raw RGB base64.
- */
+/** Native, offline, same-APK image generation. No Local Dream dependency. */
 @CapacitorPlugin(name = "NovaImage")
 class NovaImagePlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val generating = AtomicBoolean(false)
-    private val cancelRequested = AtomicBoolean(false)
-    @Volatile private var activeConnection: HttpURLConnection? = null
-
-    private fun connect(path: String, timeoutMs: Int): HttpURLConnection {
-        check(path == "/tokenize" || path == "/generate") { "Недопустимый локальный маршрут" }
-        return (URL("http://127.0.0.1:8081$path").openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
-            requestMethod = "POST"
-            instanceFollowRedirects = false
-            connectTimeout = 2500
-            readTimeout = timeoutMs
-            doOutput = true
-            useCaches = false
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("Accept", "application/json, text/event-stream")
-        }
+    private val importing = AtomicBoolean(false)
+    private val prefs get() = context.getSharedPreferences("nova_image_native", 0)
+    private fun verified(id: String?) =
+        id != null && prefs.getString("last_success_model_id", null) == id
+    private fun lastError(id: String?) =
+        if (id != null && prefs.getString("last_error_model_id", null) == id)
+            prefs.getString("last_error", null) else null
+    private fun memoryInfo(): ActivityManager.MemoryInfo {
+        val service = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return ActivityManager.MemoryInfo().also { service.getMemoryInfo(it) }
     }
 
-    private fun postJson(connection: HttpURLConnection, request: JSONObject) {
-        connection.outputStream.use {
-            it.write(request.toString().toByteArray(Charsets.UTF_8))
-            it.flush()
-        }
+    private fun availableMemoryMib(): Long = memoryInfo().availMem / (1024 * 1024)
+
+    /** Never assume a model is safe to load just because its file exists. */
+    private fun resourceWarning(size: Int): String? {
+        val memory = memoryInfo()
+        val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val tooHot = power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE
+        return NovaImageSafety.warning(
+            memory.availMem / (1024 * 1024), memory.lowMemory, tooHot, size
+        )
     }
 
-    private fun tokenizeCount(prompt: String): Pair<Int, Int> {
-        val probe = connect("/tokenize", 6000)
-        try {
-            postJson(probe, JSONObject().put("prompt", prompt))
-            check(probe.responseCode == 200) {
-                "Порт 8081 не отвечает как Local Dream (HTTP ${probe.responseCode})"
+    private fun dir() = File(context.filesDir, "visual-models").also {
+        check(it.isDirectory || it.mkdirs()) { "Не удаётся создать хранилище" }
+    }
+
+    private fun find(id: String): File? {
+        if (id == NovaRecommendedImageModel.ID) return NovaRecommendedImageModel.installed(context)
+        if (!Regex("^[a-f0-9-]{36}$").matches(id)) return null
+        return listOf("safetensors", "gguf")
+            .map { File(dir(), "$id.$it") }
+            .firstOrNull { it.isFile }
+    }
+
+    private fun installed(): List<Pair<String, File>> {
+        val custom = dir().listFiles()?.filter {
+            it.isFile && it.extension in listOf("gguf", "safetensors")
+        }?.mapNotNull { file ->
+            val id = file.name.substringBeforeLast('.')
+            if (find(id) == file) id to file else null
+        }?.sortedBy { it.first } ?: emptyList()
+        val curated = NovaRecommendedImageModel.installed(context)?.let {
+            listOf(NovaRecommendedImageModel.ID to it)
+        } ?: emptyList()
+        return curated + custom
+    }
+
+    private fun selected(): String? {
+        val saved = prefs.getString("selected_id", null)
+        if (saved != null && find(saved) != null) return saved
+        return installed().firstOrNull()?.first
+    }
+
+    private fun validate(file: File, ext: String) {
+        require(file.length() in 40_000_000L..8_000_000_000L) {
+            "Неверный размер графической модели"
+        }
+        FileInputStream(file).use { stream ->
+            val first = ByteArray(9)
+            require(stream.read(first) == 9) { "Файл пустой" }
+            if (ext == "gguf") {
+                require(String(first, 0, 4, Charsets.US_ASCII) == "GGUF") {
+                    "GGUF повреждена. Текстовая GGUF не подходит для рисования."
+                }
+            } else {
+                val length = ByteBuffer.wrap(first, 0, 8)
+                    .order(ByteOrder.LITTLE_ENDIAN).long
+                require(length in 2..10_000_000L && first[8] == '{'.code.toByte()) {
+                    "Неверный заголовок safetensors"
+                }
             }
-            val reply = probe.inputStream.bufferedReader().use { it.readText().take(4096) }
-            val json = JSONObject(reply)
-            val max = json.optInt("max_length", 0)
-            val count = json.optInt("count", 0)
-            check(max == 77 && count > 0) {
-                "Порт 8081 занят другим сервисом или отвечает неверно"
-            }
-            return count to max
-        } finally {
-            probe.disconnect()
         }
     }
 
-    private fun requireLocalDream() {
-        tokenizeCount("NOVA connection test")
-    }
-
-
-    // Local Dream 3.x optional controlled mode (the user enables it ONCE in Local Dream).
-    // Port 8808 is local-only from NOVA's perspective; no arbitrary host/URL can be passed in.
-    // Some versions of Local Dream do not implement this API; manual mode is retained.
-    private fun control(path: String, method: String = "GET"): HttpURLConnection {
-        require(path in listOf("/info", "/models", "/status", "/select")) {
-            "Неизвестный маршрут управления"
-        }
-        return (URL("http://127.0.0.1:8808" + path)
-            .openConnection(Proxy.NO_PROXY) as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 2500
-            readTimeout = 6500
-            instanceFollowRedirects = false
-            doOutput = method == "POST"
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        }
-    }
-
-    private fun controlGet(path: String): JSONObject {
-        val conn = control(path)
+    @PluginMethod
+    fun status(call: PluginCall) {
         try {
-            check(conn.responseCode == 200) { "Control API HTTP " + conn.responseCode }
-            return conn.inputStream.bufferedReader().use {
-                JSONObject(it.readText().take(256_000))
-            }
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun controlPostSelect(id: String, size: Int) {
-        val conn = control("/select", "POST")
-        try {
-            postJson(conn, JSONObject().apply {
-                put("model_id", id)
-                put("width", size)
-                put("height", size)
+            val model = selected()
+            val error = NativeImageEngine.libraryError()
+            call.resolve(JSObject().apply {
+                put("ready", error == null && model != null)
+                put("backend", "NOVA Native Image CPU")
+                put("generating", generating.get())
+                put("selectedId", model ?: "")
+                put("testedOnDevice", verified(model))
+                put("lastError", lastError(model) ?: "")
+                put("freeMemoryMib", availableMemoryMib())
+                put("resourceWarning", resourceWarning(256) ?: "")
+                put("detail", when {
+                    error != null -> "Нативная библиотека недоступна: $error"
+                    model == null -> "Добавь модель изображений через «Мозги». Нужен совместимый checkpoint SD 1.5; текстовая Gemma GGUF не подходит."
+                    verified(model) -> "✅ Эта графическая модель уже создала PNG внутри NOVA на этом устройстве."
+                    lastError(model) != null -> "Последний тест неудачен: " + lastError(model)
+                    else -> "Модель установлена, но генерация на этом телефоне ещё не проверена."
+                })
             })
-            check(conn.responseCode == 200) {
-                "Local Dream отказал в активации: " + conn.responseCode
-            }
-            val response = conn.inputStream.bufferedReader().use {
-                JSONObject(it.readText().take(4096))
-            }
-            check(response.optBoolean("ok", false)) { "Local Dream не подтвердил выбор модели" }
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun managedCatalog(): JSONArray {
-        val info = controlGet("/info")
-        check(info.optString("app") == "localdream" && info.optInt("protocol") == 1) {
-            "Порт управления занят неизвестным сервисом"
-        }
-        return controlGet("/models").optJSONArray("models") ?: JSONArray()
-    }
-
-    private fun preferredImageId(catalog: JSONArray): String? {
-        val models = (0 until catalog.length())
-            .mapNotNull { catalog.optJSONObject(it) }
-        val saved = context.getSharedPreferences("nova_image_manager", 0)
-            .getString("image_id", null)
-        val preferred = models.firstOrNull { it.optString("id") == saved }
-            ?: models.firstOrNull {
-                it.optString("name").contains("Absolute Reality", ignoreCase = true)
-            }
-            ?: models.firstOrNull { it.optBoolean("run_on_cpu", false) }
-            ?: models.firstOrNull()
-        return preferred?.optString("id")?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) { call.reject("Проверка: $e", e) }
     }
 
     @PluginMethod
     fun imageModels(call: PluginCall) {
-        scope.launch {
-            try {
-                val catalog = managedCatalog()
-                val native = controlGet("/status")
-                val entries = JSArray()
-                for (i in 0 until catalog.length()) {
-                    val model = catalog.optJSONObject(i) ?: continue
-                    entries.put(JSObject().apply {
-                        put("id", model.optString("id"))
-                        put("name", model.optString("name"))
-                        put("cpu", model.optBoolean("run_on_cpu", false))
-                        put("selected", model.optString("id") == preferredImageId(catalog))
-                    })
-                }
-                call.resolve(JSObject().apply {
-                    put("managed", true)
-                    put("models", entries)
-                    put("selectedId", preferredImageId(catalog) ?: "")
-                    put("activeId", native.optString("serving_model_id"))
-                    put("state", native.optString("state"))
-                    put("generating", generating.get())
-                })
-            } catch (_: Exception) {
-                call.resolve(JSObject().apply {
-                    put("managed", false)
-                    put("models", JSArray())
-                    put("state", "manual")
-                    put("detail", "Для автоматического выбора моделей открой новую версию Local Dream и включи режим управления устройством. В старой версии выбери модель вручную; NOVA подключится к уже запущенной модели.")
+        try {
+            val items = JSArray()
+            val id = selected()
+            for ((key, file) in installed()) {
+                items.put(JSObject().apply {
+                    put("id", key)
+                    put("name", if (key == NovaRecommendedImageModel.ID)
+                        NovaRecommendedImageModel.NAME
+                        else prefs.getString("name_$key", file.name))
+                    put("bytes", file.length())
+                    put("selected", id == key)
+                    put("cpu", true)
+                    put("validated", key == NovaRecommendedImageModel.ID)
+                    put("testedOnDevice", verified(key))
+                    put("lastError", lastError(key) ?: "")
                 })
             }
-        }
+            call.resolve(JSObject().apply {
+                put("managed", true)
+                put("backend", "NOVA Native Image")
+                put("installed", NativeImageEngine.libraryReady())
+                put("models", items)
+                put("selectedId", id ?: "")
+                put("activeId", id ?: "")
+                put("state", if (generating.get()) "generating"
+                    else if (id != null) "installed" else "missing_model")
+                put("generating", generating.get())
+            })
+        } catch (e: Exception) { call.reject("Каталог: $e", e) }
     }
 
     @PluginMethod
     fun selectImageModel(call: PluginCall) {
         val id = call.getString("id").orEmpty()
-        if (generating.get()) {
-            call.reject("Нельзя переключать модель во время генерации")
+        if (find(id) == null || generating.get() || importing.get()) {
+            call.reject("Модель не найдена или движок занят")
             return
         }
-        scope.launch {
-            try {
-                val catalog = managedCatalog()
-                check((0 until catalog.length()).any {
-                    catalog.optJSONObject(it)?.optString("id") == id
-                }) { "Такой модели нет среди установленных в Local Dream" }
-                controlPostSelect(id, 512)
-                context.getSharedPreferences("nova_image_manager", 0).edit()
-                    .putString("image_id", id).apply()
-                call.resolve(JSObject().apply {
-                    put("selected", true)
-                    put("id", id)
-                    put("state", "starting")
-                })
-            } catch (e: Exception) {
-                call.reject("Не удалось подключить модель изображений: " + e.message, e)
-            }
-        }
-    }
-
-    private suspend fun ensureImageReady(size: Int) {
-        // Managed mode: verify the SELECTED model, not just any live /tokenize service.
-        // Manual mode: keep supporting older Local Dream builds after user opens one model.
-        val catalog = try { managedCatalog() } catch (_: Exception) { null }
-        if (catalog == null) {
-            requireLocalDream()
-            return
-        }
-
-        val selected = preferredImageId(catalog)
-            ?: error("В Local Dream ещё нет установленных моделей")
-        val current = controlGet("/status")
-        val sameModel = current.optString("state") == "running" &&
-            current.optString("serving_model_id") == selected &&
-            current.optInt("width", size) == size
-        if (sameModel) {
-            try {
-                requireLocalDream()
-                return
-            } catch (_: Exception) { /* backend may still be warming up */ }
-        } else {
-            controlPostSelect(selected, size)
-        }
-
-        repeat(90) {
-            if (cancelRequested.get()) throw IOException("Остановлено")
-            delay(1000L)
-            val status = controlGet("/status")
-            if (status.optString("state") == "error") {
-                throw IOException("Local Dream: " + status.optString("message"))
-            }
-            if (status.optString("state") == "running" &&
-                status.optString("serving_model_id") == selected &&
-                status.optInt("width", size) == size) {
-                try {
-                    requireLocalDream()
-                    return
-                } catch (_: Exception) { /* the token endpoint may not be ready yet */ }
-            }
-        }
-        throw IOException("Local Dream не запустил нужную модель. Проверь режим управления и ограничения батареи.")
+        prefs.edit().putString("selected_id", id).apply()
+        call.resolve(JSObject().apply { put("selected", true); put("id", id) })
     }
 
     @PluginMethod
-    fun status(call: PluginCall) {
+    fun importImageModel(call: PluginCall) {
+        if (generating.get() || !importing.compareAndSet(false, true)) {
+            call.reject("Сначала закончи текущую задачу")
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(call, intent, "imageModelSelected")
+        } catch (e: Exception) {
+            importing.set(false)
+            call.reject("Не удалось открыть выбор модели: $e", e)
+        }
+    }
+
+    @ActivityCallback
+    private fun imageModelSelected(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            importing.set(false)
+            call.reject("Импорт отменён")
+            return
+        }
         scope.launch {
+            var partial: File? = null
+            var output: File? = null
             try {
-                requireLocalDream()
+                val filename = context.contentResolver.query(
+                    uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: "image-model.safetensors"
+                val ext = filename.substringAfterLast('.', "").lowercase()
+                require(ext in listOf("gguf", "safetensors")) {
+                    "Выбери модель изображений safetensors или GGUF"
+                }
+                val id = UUID.randomUUID().toString()
+                partial = File(dir(), "$id.part")
+                output = File(dir(), "$id.$ext")
+                val available = StatFs(dir().absolutePath).availableBytes
+                val reported = context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                    it.statSize
+                } ?: -1L
+                require(available > 2_000_000_000L) {
+                    "На телефоне осталось менее 2 ГБ свободного места"
+                }
+                if (reported > 0) require(available - reported > 2_000_000_000L) {
+                    "Недостаточно места. Оставь хотя бы 2 ГБ после импорта."
+                }
+                context.contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Не удалось открыть файл" }
+                    partial!!.outputStream().buffered().use { dest ->
+                        val buffer = ByteArray(1024 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            total += n
+                            require(total <= 8_000_000_000L) { "Модель больше 8 ГБ" }
+                            if (total % (16L * 1024 * 1024) < n) {
+                                require(StatFs(dir().absolutePath).availableBytes > 2_000_000_000L) {
+                                    "Недостаточно места для безопасного импорта. Частичный файл будет удалён."
+                                }
+                            }
+                            dest.write(buffer, 0, n)
+                        }
+                    }
+                }
+                validate(partial!!, ext)
+                check(partial!!.renameTo(requireNotNull(output))) { "Не удалось завершить импорт" }
+                prefs.edit().putString("name_$id", filename.take(120))
+                    .putString("selected_id", id).apply()
                 call.resolve(JSObject().apply {
-                    put("ready", true)
-                    put("backend", "Local Dream")
-                    put("location", "127.0.0.1")
-                    put("generating", generating.get())
+                    put("imported", true)
+                    put("id", id)
+                    put("name", filename.take(120))
                 })
             } catch (e: Exception) {
-                call.resolve(JSObject().apply {
-                    put("ready", false)
-                    put("generating", generating.get())
-                    put("detail", "Открой Local Dream, выбери Absolute Reality и оставь модель загруженной. Проверь, что порт 8081 не занят видеосервером NOVA. ${e.message ?: ""}")
-                })
+                output?.delete()
+                call.reject("Не удалось импортировать модель: $e", e)
+            } finally {
+                partial?.delete()
+                importing.set(false)
             }
         }
     }
@@ -293,140 +278,116 @@ class NovaImagePlugin : Plugin() {
     @PluginMethod
     fun generate(call: PluginCall) {
         val prompt = call.getString("prompt")?.trim().orEmpty()
-        val negative = call.getString("negative")?.trim().orEmpty().ifBlank {
-            "deformed face, disfigured, bad anatomy, blurry, text, watermark"
-        }
-        val size = call.getInt("size") ?: 512
-        if (prompt.length !in 5..600 || negative.length > 400 || size !in listOf(256, 512)) {
-            call.reject("Описание: 5–600 символов, размер 256 или 512")
+        val negative = call.getString("negative").orEmpty()
+            .ifBlank { "blurred, distorted face, bad anatomy, watermark, text" }
+        val size = call.getInt("size") ?: 256
+        val steps = call.getInt("steps") ?: 12
+        if (prompt.length !in 5..600 || negative.length > 400 ||
+            size !in listOf(256, 512) || steps !in 1..30) {
+            call.reject("Проверь описание, размер 256/512 и число шагов 1–30")
             return
         }
-        if (!generating.compareAndSet(false, true)) {
-            call.reject("Изображение уже создаётся. Дождись окончания или останови задачу.")
+        val file = selected()?.let { find(it) }
+        if (file == null || !NativeImageEngine.libraryReady()) {
+            call.reject("Графический мозг не готов. Импортируй совместимую модель в «Мозги».")
             return
         }
-        cancelRequested.set(false)
-        val requestId = call.getString("requestId") ?: UUID.randomUUID().toString()
-
+        if (!NovaComputeGate.beginImage()) {
+            call.reject("Сначала нужно освободить память от текстового мозга NOVA")
+            return
+        }
+        // Image admission owns the global compute gate, so a failure here
+        // releases only our own reservation and leaves Gemma untouched.
+        val unsafe = try { resourceWarning(size) }
+        catch (e: Exception) {
+            NovaComputeGate.finishImage()
+            call.reject("Не удалось проверить RAM или нагрев: " + e.message, e)
+            return
+        }
+        if (unsafe != null) {
+            NovaComputeGate.finishImage()
+            call.reject(unsafe)
+            return
+        }
+        if (importing.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.finishImage()
+            call.reject("Генератор уже занят")
+            return
+        }
         scope.launch {
+            val monitor = launch {
+                while (generating.get()) {
+                    val p = NativeImageEngine.progress()
+                    notifyListeners("novaImageProgress", JSObject().apply {
+                        put("step", p.getOrElse(0) { 0 })
+                        put("total", p.getOrElse(1) { steps })
+                    })
+                    delay(1500L)
+                }
+            }
             try {
-                ensureImageReady(size)
-                if (cancelRequested.get()) throw IOException("Остановлено пользователем")
-                val (tokens, capacity) = tokenizeCount(prompt)
-                require(tokens <= capacity) {
-                    "Описание содержит $tokens токенов, а модель понимает только $capacity. Сократи описание и попробуй снова."
-                }
-                if (cancelRequested.get()) throw IOException("Остановлено пользователем")
-
-                val payload = JSONObject().apply {
-                    put("prompt", prompt)
-                    put("negative_prompt", negative)
-                    put("size", size)
-                    put("steps", 20)
-                    put("cfg", 7.0)
-                    put("scheduler", "dpm")
-                    put("use_opencl", false)
-                    put("show_diffusion_process", false)
-                }
-                val connection = connect("/generate", 25 * 60 * 1000)
-                activeConnection = connection
-                postJson(connection, payload)
-                if (connection.responseCode != 200) {
-                    val explanation = connection.errorStream?.bufferedReader()?.use {
-                        it.readText().take(300)
-                    } ?: "HTTP ${connection.responseCode}"
-                    throw IOException("Local Dream отклонил запрос: $explanation")
-                }
-
-                var completed: JSONObject? = null
-                BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { input ->
-                    while (true) {
-                        if (cancelRequested.get()) throw IOException("Остановлено пользователем")
-                        val line = input.readLine() ?: break
-                        if (!line.startsWith("data:")) continue
-                        val message = JSONObject(line.substring(5).trim())
-                        when (message.optString("type")) {
-                            "progress" -> {
-                                val step = message.optInt("step")
-                                val total = message.optInt("total_steps")
-                                if (step == 1 || step % 2 == 0 || step == total) {
-                                    notifyListeners("novaImageProgress", JSObject().apply {
-                                        put("requestId", requestId)
-                                        put("step", step)
-                                        put("total", total)
-                                    })
-                                }
-                            }
-                            "complete" -> {
-                                completed = message
-                                break
-                            }
-                            "error" -> throw IOException(message.optString("message", "Ошибка генерации"))
-                        }
-                    }
-                }
-                if (cancelRequested.get()) throw IOException("Остановлено пользователем")
-                val result = requireNotNull(completed) { "Local Dream не вернул готовую картинку" }
-                val width = result.getInt("width")
-                val height = result.getInt("height")
-                check(width in 128..512 && height in 128..512) { "Недопустимый размер полученного изображения" }
-                check(result.optInt("channels") == 3) { "Неподдерживаемый формат изображения" }
-                val rgb = Base64.decode(result.getString("image"), Base64.DEFAULT)
-                check(rgb.size == width * height * 3) { "Неполные данные изображения" }
-
-                val pixels = NovaImagePixels.toArgb(rgb, width, height)
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val rgb = NativeImageEngine.generate(
+                    file.absolutePath, prompt, negative, size, steps, System.currentTimeMillis()
+                )
+                require(rgb.size == size * size * 3) { "Неполные пиксели изображения" }
+                val pixels = NovaImagePixels.toArgb(rgb, size, size)
+                val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
                 try {
-                    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-                    val png = ByteArrayOutputStream().use { output ->
+                    bitmap.setPixels(pixels, 0, size, 0, 0, size, size)
+                    val png = java.io.ByteArrayOutputStream().use { output ->
                         check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                            "Не удалось подготовить PNG"
+                            "Не получилось создать PNG"
                         }
                         output.toByteArray()
                     }
-                    val uri = saveToGallery(png)
+                    val uri = savePng(png)
                     call.resolve(JSObject().apply {
-                        put("ready", true)
                         put("saved", true)
+                        put("width", size)
+                        put("height", size)
                         put("imageUri", uri.toString())
-                        put("preview", "data:image/png;base64," + Base64.encodeToString(png, Base64.NO_WRAP))
-                        put("width", width)
-                        put("height", height)
-                        put("seed", result.optLong("seed"))
-                        put("generationTimeMs", result.optLong("generation_time_ms"))
-                        put("backend", "Local Dream CPU")
+                        put("preview", "data:image/png;base64," +
+                            Base64.encodeToString(png, Base64.NO_WRAP))
+                        put("backend", "NOVA Native CPU")
                     })
-                } finally {
-                    bitmap.recycle()
-                }
+                    prefs.edit().putString("last_success_model_id", selected())
+                        .remove("last_error_model_id").remove("last_error").apply()
+                } finally { bitmap.recycle() }
             } catch (e: Exception) {
-                val detail = e.message ?: e.javaClass.simpleName
-                call.reject("Создание изображения не завершено: $detail", e)
+                prefs.edit()
+                    .putString("last_error_model_id", selected())
+                    .putString("last_error", (e.message ?: e.javaClass.simpleName).take(350))
+                    .apply()
+                call.reject("Нативная генерация не завершена: $e", e)
             } finally {
-                activeConnection?.disconnect()
-                activeConnection = null
                 generating.set(false)
-                cancelRequested.set(false)
+                monitor.cancel()
+                NovaComputeGate.finishImage()
             }
         }
     }
 
-    private fun saveToGallery(bytes: ByteArray): Uri {
-        val name = "NOVA-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(6)}.png"
+    private fun savePng(bytes: ByteArray): Uri {
+        val resolver = context.contentResolver
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.DISPLAY_NAME,
+                "NOVA-${System.currentTimeMillis()}.png")
             put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/NOVA")
+            put(MediaStore.Images.Media.RELATIVE_PATH,
+                Environment.DIRECTORY_PICTURES + "/NOVA")
             put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        val resolver = context.contentResolver
-        val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)) {
-            "Галерея недоступна"
-        }
+        val uri = requireNotNull(resolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+        )) { "Галерея недоступна" }
         try {
-            resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                ?: throw IOException("Не удалось сохранить изображение в галерею")
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            resolver.openOutputStream(uri).use { stream ->
+                requireNotNull(stream) { "Нет доступа к галерее" }
+                stream.write(bytes)
+            }
+            resolver.update(uri, ContentValues().apply {
+                put(MediaStore.Images.Media.IS_PENDING, 0)
+            }, null, null)
             return uri
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
@@ -435,39 +396,14 @@ class NovaImagePlugin : Plugin() {
     }
 
     @PluginMethod
-    fun openLocalDream(call: PluginCall) {
-        activity.runOnUiThread {
-            try {
-                val launch = context.packageManager.getLaunchIntentForPackage(
-                    "io.github.xororz.localdream"
-                )
-                if (launch == null) {
-                    call.reject("Local Dream не обнаружен на телефоне")
-                } else {
-                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launch)
-                    call.resolve(JSObject().apply { put("opened", true) })
-                }
-            } catch (e: Exception) {
-                call.reject("Не удалось открыть Local Dream: ${e.message}", e)
-            }
-        }
-    }
-
-    @PluginMethod
     fun cancel(call: PluginCall) {
-        if (!generating.get()) {
-            call.resolve(JSObject().apply { put("cancelRequested", false) })
-            return
-        }
-        cancelRequested.set(true)
-        activeConnection?.disconnect()
-        call.resolve(JSObject().apply { put("cancelRequested", true) })
+        call.resolve(JSObject().apply {
+            put("cancelRequested", NativeImageEngine.cancel())
+        })
     }
 
     override fun handleOnDestroy() {
-        cancelRequested.set(true)
-        activeConnection?.disconnect()
+        NativeImageEngine.cancel()
         scope.cancel()
         super.handleOnDestroy()
     }

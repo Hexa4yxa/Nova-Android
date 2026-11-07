@@ -1,0 +1,186 @@
+name: NOVA Stable • signed manual release
+
+# Intentionally NOT triggered by push. Never publish a debug-signed APK as
+# the permanent NOVA. The owner configures the one permanent signing key
+# through GitHub Actions secrets before running this workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nova-stable-release
+  cancel-in-progress: false
+
+jobs:
+  stable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm approved manual release entrypoint
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ] && [ "$GITHUB_REF" != "refs/heads/feature/nova-native-image-engine" ]; then
+            echo "::error::Use main or the native-image branch for signed NOVA release."
+            exit 1
+          fi
+
+      # Deliberately build the exact revision that passed the full native
+      # image Kotlin/Android CI (#147) rather than arbitrary workflow branch.
+      # Update this SHA only after subsequent green integration CI.
+      - name: Checkout CI-verified NOVA source
+        uses: actions/checkout@v4
+        with:
+          ref: f24d25c4b99bf93884be0e362d06a1c0e621854f
+
+      - name: Checkout pinned llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+
+      - name: Checkout pinned native SD engine
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Android NDK and CMake
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+          test -f "$ANDROID_HOME/ndk/29.0.13113456/build/cmake/android.toolchain.cmake"
+          test -f "$ANDROID_HOME/cmake/3.31.6/bin/cmake"
+
+      - name: Check that permanent signing secrets exist
+        env:
+          KEYSTORE_B64: ${{ secrets.NOVA_SIGNING_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.NOVA_SIGNING_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ]; then
+            echo "::error::Stable signing is NOT configured. Do not uninstall the installed NOVA. Owner must add permanent signing key and GitHub secrets."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/nova-stable.p12"
+          test -s "$RUNNER_TEMP/nova-stable.p12"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          SIGNER="$(keytool -list -v -storetype PKCS12 -alias nova-stable \
+            -keystore "$RUNNER_TEMP/nova-stable.p12" -storepass:env KEYSTORE_PASS \
+            | grep -m1 'SHA256:' | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':' | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          if [ "$SIGNER" != "$EXPECTED" ]; then
+            echo "::error::NOVA signing key differs from the pinned owner certificate. Refusing to publish an incompatible update."
+            exit 1
+          fi
+          echo "NOVA Stable signer verified against pinned public fingerprint."
+
+      - name: Install dependencies and sync Capacitor
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Verify NOVA offline tools contracts
+        run: |
+          node --test tests/council-ui.test.cjs tests/nova-tools-ui.test.cjs tests/nova-image-ui.test.cjs tests/nova-brains-ui.test.cjs tests/nova-native-image.test.cjs tests/nova-tool-registry.test.cjs tests/nova-model-recovery.test.cjs
+
+      - name: Set monotonically increasing stable version
+        shell: bash
+        run: echo "NOVA_STABLE_VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Kotlin tests and permanently signed stable APK
+        working-directory: android
+        env:
+          NOVA_STABLE_KEYSTORE_PATH: ${{ runner.temp }}/nova-stable.p12
+          NOVA_SIGNING_PASSWORD: ${{ secrets.NOVA_SIGNING_PASSWORD }}
+        run: |
+          bash gradlew testDebugUnitTest assembleRelease --no-daemon
+
+      - name: Verify signature and stable package identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$BUILD_TOOLS/apksigner"
+          test -x "$BUILD_TOOLS/aapt"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          # Android build-tools may print either "Signer #1 ..." or
+          # "V2 Signer: ...". Both formats identify the same public signer.
+          # Read just the hash; never output the signing key or its password.
+          ACTUAL="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" \
+            | sed -n -E 's/^(V[123] Signer: |Signer #[0-9]+ )certificate SHA-256 digest: ([0-9a-fA-F]{64})$/\2/p' \
+            | sed -n '1p' | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          if ! [[ "$ACTUAL" =~ ^[0-9A-F]{64}$ ]] || [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Signed APK public certificate fingerprint does not match pinned NOVA Stable certificate."
+            exit 1
+          fi
+          echo "NOVA Stable APK signer matches the pinned owner certificate."
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
+          mkdir -p release
+          cp "$APK" release/NOVA-Stable.apk
+          sha256sum release/NOVA-Stable.apk > release/SHA256SUMS.txt
+
+      # Preserve the verified signed APK independently of Releases write access.
+      # Artifact upload uses the Actions artifact service and does not include
+      # keystores, passwords, or private signing material.
+      - name: Upload verified stable APK as downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-Stable-${{ github.run_number }}
+          path: |
+            release/NOVA-Stable.apk
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish signed APK for in-place stable updates
+        id: publish_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "nova-stable-${{ github.run_number }}" release/NOVA-Stable.apk release/SHA256SUMS.txt \
+            --title "NOVA Stable #${{ github.run_number }}" --prerelease \
+            --notes "Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
+            --target "$(git rev-parse HEAD)"
+
+      - name: Explain release publishing fallback
+        if: steps.publish_release.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::GitHub Releases publishing was denied. The validated owner-signed NOVA-Stable.apk was uploaded to Actions Artifacts instead."
+          {
+            echo "### NOVA Stable APK ready in Actions Artifacts"
+            echo ""
+            echo "GitHub Releases returned a permissions error, but APK building, permanent signature verification, and artifact upload succeeded."
+            echo "Open the run page and download **NOVA-Stable-${{ github.run_number }}** from **Artifacts**. ZIP contains NOVA-Stable.apk and SHA256SUMS.txt."
+            echo "This is a first side-by-side install. Do NOT uninstall old NOVA or delete models."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up signing file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nova-stable.p12"
