@@ -90,6 +90,7 @@ button:disabled{opacity:.45}
 <script src="nova_image_prompt_guard.js"></script>
 <script src="nova_story_director.js"></script>
 <script src="nova_story_ui.js"></script>
+<script src="nova_story_chat.js"></script>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
@@ -294,6 +295,67 @@ async function handleImageMessage(text,requestedPrompt){
  }
 }
 
+
+async function handleStoryImageMessage(text){
+ if(busy||imageBusy)return;
+ busy=true;
+ const sendButton=document.getElementById('send');
+ const stopButton=document.getElementById('stop');
+ sendButton.disabled=true;
+ history.push({who:'user',text});
+ input.value='';
+ const waiting={who:'nova',text:'🎬 NOVA готовит новую историю...'};
+ history.push(waiting);
+ const update=message=>{
+  waiting.text=message;
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+ };
+ let cancelled=false;
+ stopButton.style.display='inline-block';
+ stopButton.disabled=false;
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ const image=window.Capacitor?.Plugins?.NovaImage;
+ stopButton.onclick=async()=>{
+  cancelled=true;
+  stopButton.disabled=true;
+  update('■ Останавливаю задачу NOVA...');
+  try{await brain?.cancelChat?.();}catch(error){console.warn('Cancel story plan',error);}
+  try{await image?.cancel?.();}catch(error){console.warn('Cancel image render',error);}
+ };
+ showChat();
+ try{
+  const outcome=await window.NovaStoryChat.run({
+   text,brain,
+   generate:(prompt,onProgress)=>executeImageGeneration(prompt,onProgress,512,12),
+   isCancelled:()=>cancelled,
+   onStatus:update,
+   onPlanned:story=>{
+    update('✅ История «'+story.title+'» сохранена в Проекты. Начинаю рисовать '+story.scenes.length+' кадра...');
+   },
+   onFrame:({scene,result,completed,total})=>{
+    history.push({who:'nova',text:'✅ Кадр '+completed+' из '+total+
+      ' создан и сохранён в Галерею → Pictures/NOVA.\n'+scene.beat,
+      preview:result.preview});
+    saveHistory();
+    if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+   }
+  });
+  update(outcome.cancelled?
+   '■ Остановлено. Готовые кадры сохранены. Раскадровка осталась в Проектах.':
+   '✅ История и '+outcome.completed+' кадра готовы. Открой «Проекты» или Галерею → Pictures/NOVA.');
+ }catch(error){
+  update('⚠ NOVA не закончила задачу: '+(error?.message||String(error))+
+   '. Уже сохранённые проекты и кадры не удалены. Проверь «Проекты».');
+ }finally{
+  busy=false;
+  stopButton.style.display='none';
+  stopButton.onclick=null;
+  sendButton.disabled=false;
+  saveHistory();
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+ }
+}
+
 async function handleCapabilityMessage(text,route){
  busy=true;
  const button=document.getElementById('send');
@@ -333,6 +395,12 @@ async function send(){
  const text=input.value.trim();
  if(!text || busy)return;
 
+ // Compound story + illustration requests must use the real native tools,
+ // not a Gemma message pretending that a picture was produced.
+ if(window.NovaStoryChat?.wantsStoryImages(text)){
+  await handleStoryImageMessage(text);
+  return;
+ }
  const imagePrompt=imageRequest(text);
  if(imagePrompt!==null || awaitingImageDescription){
   if(awaitingImageDescription && /^(отмена|скасувати|cancel)$/i.test(text)){
