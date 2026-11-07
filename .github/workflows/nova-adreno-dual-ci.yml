@@ -1,7 +1,7 @@
 name: NOVA Adreno - dual CPU and GPU renderers CI
 on:
   push:
-    branches: [feature/nova-adreno-dual-engine, fix/nova-gpu-blank-output-guard, fix/nova-story-prompt-priority-and-preservation, fix/nova-six-integrate-offline-story-backup]
+    branches: [feature/nova-adreno-dual-engine, fix/nova-gpu-blank-output-guard, fix/nova-story-prompt-priority-and-preservation, fix/nova-six-integrate-offline-story-backup, fix/official-story-chat-to-images-20261107]
   workflow_dispatch:
 permissions:
   contents: read
