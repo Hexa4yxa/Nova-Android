@@ -167,10 +167,21 @@ NOVA_JNI(nativeGenerate)(
         ctx_params.n_threads = 4;
         ctx_params.backend = "cpu";
 #if defined(NOVA_GPU_IMAGE_BACKEND)
+        // RESEARCH ONLY: actual phone GPU trials remain blocked on Adreno 810
+        // by NovaImagePlugin until we understand the flat-white output/ANR.
+        // The full-GPU VAE decoder may be contributing to white readback.
+        // Use OpenCL for the diffusion network only; keep text and VAE on CPU.
+        // This upstream SD API accepts module-specific runtime assignments.
         const std::string gpu_name = opencl_device();
         if (gpu_name.empty()) throw std::runtime_error(
             "Adreno GPU backend недоступен: OpenCL не зарегистрирован в Stable Diffusion");
-        ctx_params.backend = gpu_name.c_str();
+        const std::string mixed_backend = "diffusion=" + gpu_name + ",te=cpu,vae=cpu";
+        ctx_params.backend = mixed_backend.c_str();
+        // Keep checkpoint weights in system RAM and stage only needed GPU
+        // tensors, to reduce GPU allocation pressure during denoising.
+        ctx_params.params_backend = "cpu";
+        ctx_params.disable_prefetch = true;
+        ctx_params.max_vram = "1.5";
 #endif
         ctx_params.enable_mmap = true;
 
