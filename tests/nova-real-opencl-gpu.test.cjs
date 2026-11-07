@@ -26,7 +26,7 @@ test('CPU is still an isolated native library and default in normal NOVA',()=>{
 test('GPU native library requires a real registered OpenCL device and never masquerades as CPU',()=>{
  assert.match(jni,/#define NOVA_JNI\(name\) Java_ai_nova_image_NativeGpuImageEngine_##name/);
  assert.match(jni,/sd_list_devices\(nullptr, 0\)/);
- assert.match(jni,/ctx_params\.backend = gpu_name\.c_str\(\)/);
+ assert.match(jni,/ctx_params\.backend = mixed_backend\.c_str\(\)/);
  assert.match(jni,/if \(gpu_name\.empty\(\)\) throw/);
  assert.match(jni,/Java_ai_nova_image_NativeGpuImageEngine_nativeGpuDevice/);
  assert.match(gpu,/System\.loadLibrary\("nova-image-gpu"\)/);
@@ -37,6 +37,18 @@ test('GPU native library requires a real registered OpenCL device and never masq
  assert.doesNotMatch(gpu,/private val error: String\? = try/);
  assert.match(gpu,/require\(steps in 1\.\.30\)/);
  assert.match(plugin,/put\("gpuEngineDevice", NativeGpuImageEngine\.gpuDevice\(\)\)/);
+});
+
+test('experimental OpenCL uses GPU only for diffusion and keeps VAE/TE on CPU',()=>{
+ assert.match(jni,/const std::string mixed_backend = "diffusion=" \+ gpu_name \+ ",te=cpu,vae=cpu"/);
+ assert.match(jni,/ctx_params\.params_backend = "cpu"/);
+ assert.match(jni,/ctx_params\.disable_prefetch = true/);
+ assert.match(jni,/ctx_params\.max_vram = "1\.5"/);
+ assert.match(jni,/#if defined\(NOVA_GPU_IMAGE_BACKEND\)/);
+ assert.match(jni,/ctx_params\.backend = "cpu"/);
+ assert.match(plugin,/GPU-тест на Adreno 810 временно отключён/);
+ const gpuTrial=plugin.slice(plugin.indexOf('fun gpuQuickTest('), plugin.indexOf('private fun savePng('));
+ assert.ok(gpuTrial.indexOf('containsMatchIn(gpuDriver)') < gpuTrial.indexOf('NativeGpuImageEngine.enableForApprovedTest()'));
 });
 
 test('Adreno quick test is opt-in, 256px, single step, same existing model',()=>{
