@@ -81,6 +81,7 @@ test('combined story and illustration request routes to native image engine',()=
  assert.match(js,/const storyImages=wantsStoryImages\(text\)/);
  assert.match(js,/await brain\.chat\(\{message:storyRequest,requestId\}\)/);
  assert.match(js,/await generateStoryFrames\(waiting\.text\)/);
- assert.match(js,/await executeImageGeneration\(frames\[index\]/);
+ assert.match(js,/await executeImageGeneration\(prepared\[index\]/);
+ assert.match(js,/const prepared=\[\]/);
  assert.match(js,/await image\?\.cancel\?\.\(\)/);
 });
