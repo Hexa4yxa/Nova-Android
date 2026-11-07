@@ -1,6 +1,7 @@
 package ai.nova.director
 
 import ai.nova.image.NativeImageEngine
+import ai.nova.image.NativeGpuImageEngine
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
@@ -125,6 +126,9 @@ class NovaImagePlugin : Plugin() {
                 put("ready", error == null && model != null)
                 put("backend", "NOVA Native Image CPU")
                 put("gpuProbe", NativeImageEngine.gpuProbe())
+                put("gpuEngineAvailable", NativeGpuImageEngine.libraryReady())
+                put("gpuEngineDevice", NativeGpuImageEngine.gpuDevice())
+                put("gpuEngineError", NativeGpuImageEngine.libraryError() ?: "")
                 put("generating", generating.get())
                 put("selectedId", model ?: "")
                 put("testedOnDevice", verified(model))
@@ -374,6 +378,101 @@ class NovaImagePlugin : Plugin() {
         }
     }
 
+    /**
+     * Explicit opt-in smoke test: one step, 256px, fixed seed, English prompt.
+     * Never automatically substitute CPU if GPU initialization fails: that
+     * would hide backend errors and could waste 20 minutes on CPU.
+     */
+    @PluginMethod
+    fun gpuQuickTest(call: PluginCall) {
+        if (!call.getBoolean("approved", false)) {
+            call.reject("GPU-тест запускается только после подтверждения")
+            return
+        }
+        val file = selected()?.let { find(it) }
+        if (file == null) { call.reject("Сначала подключи SD 1.5"); return }
+        if (!NativeGpuImageEngine.libraryReady()) {
+            call.reject("GPU-библиотека недоступна: " + (NativeGpuImageEngine.libraryError() ?: "неизвестная ошибка"))
+            return
+        }
+        val device = NativeGpuImageEngine.gpuDevice()
+        if (device.isBlank()) {
+            call.reject("Adreno доступен Android, но вычислительный OpenCL backend пока не зарегистрирован")
+            return
+        }
+        if (!NovaComputeGate.beginImage()) {
+            call.reject("Сначала освободи память Gemma")
+            return
+        }
+        val unsafe = try { resourceWarning(256) }
+        catch (e: Exception) {
+            NovaComputeGate.finishImage()
+            call.reject("Проверка ресурсов: " + e.message, e)
+            return
+        }
+        if (unsafe != null) {
+            NovaComputeGate.finishImage()
+            call.reject(unsafe)
+            return
+        }
+        if (importing.get() || !generating.compareAndSet(false, true)) {
+            NovaComputeGate.finishImage()
+            call.reject("Генератор занят")
+            return
+        }
+        scope.launch {
+            val monitor = launch {
+                while (generating.get()) {
+                    val p = NativeGpuImageEngine.progress()
+                    notifyListeners("novaImageProgress", JSObject().apply {
+                        put("step", p.getOrElse(0) { 0 })
+                        put("total", p.getOrElse(1) { 1 })
+                        put("backend", "OpenCL GPU")
+                    })
+                    delay(1500L)
+                }
+            }
+            try {
+                val testPrompt = "photorealistic red apple on a wooden table, natural light, clean background"
+                val rgb = NativeGpuImageEngine.generate(file.absolutePath,
+                    testPrompt, "blurry, watermark, text", 256, 1, 4242L)
+                require(rgb.size == 256 * 256 * 3) { "GPU не вернул полный RGB-кадр" }
+                val timing = NativeGpuImageEngine.timings()
+                val pixels = NovaImagePixels.toArgb(rgb, 256, 256)
+                val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.setPixels(pixels, 0, 256, 0, 0, 256, 256)
+                    val png = java.io.ByteArrayOutputStream().use { stream ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "Ошибка GPU PNG" }
+                        stream.toByteArray()
+                    }
+                    val uri = savePng(png)
+                    call.resolve(JSObject().apply {
+                        put("saved", true)
+                        put("backend", "OpenCL GPU")
+                        put("gpuDevice", device)
+                        put("width", 256)
+                        put("height", 256)
+                        put("steps", 1)
+                        put("seed", 4242)
+                        put("imageUri", uri.toString())
+                        put("preview", "data:image/png;base64," +
+                            Base64.encodeToString(png, Base64.NO_WRAP))
+                        put("modelLoadMs", timing.getOrElse(0) { 0L })
+                        put("samplingMs", timing.getOrElse(1) { 0L })
+                    })
+                } finally { bitmap.recycle() }
+            } catch (e: Exception) {
+                // CPU remains untouched: error returns to UI for diagnosis.
+                call.reject("OpenCL тест не завершён: " + (e.message ?: e.javaClass.simpleName), e)
+            } finally {
+                generating.set(false)
+                monitor.cancel()
+                NovaComputeGate.finishImage()
+            }
+        }
+    }
+
     private fun savePng(bytes: ByteArray): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
@@ -405,12 +504,13 @@ class NovaImagePlugin : Plugin() {
     @PluginMethod
     fun cancel(call: PluginCall) {
         call.resolve(JSObject().apply {
-            put("cancelRequested", NativeImageEngine.cancel())
+            put("cancelRequested", NativeImageEngine.cancel() || NativeGpuImageEngine.cancel())
         })
     }
 
     override fun handleOnDestroy() {
         NativeImageEngine.cancel()
+        NativeGpuImageEngine.cancel()
         scope.cancel()
         super.handleOnDestroy()
     }
