@@ -1,7 +1,7 @@
 name: NOVA Adreno - dual CPU and GPU renderers CI
 on:
   push:
-    branches: [feature/nova-adreno-dual-engine]
+    branches: [feature/nova-adreno-dual-engine, fix/nova-gpu-blank-output-guard]
   workflow_dispatch:
 permissions:
   contents: read
