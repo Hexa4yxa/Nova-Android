@@ -6,10 +6,18 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
+#include <cctype>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#if defined(NOVA_GPU_IMAGE_BACKEND)
+#define NOVA_JNI(name) Java_ai_nova_image_NativeGpuImageEngine_##name
+#else
+#define NOVA_JNI(name) Java_ai_nova_image_NativeImageEngine_##name
+#endif
 
 namespace {
 std::mutex active_mutex;
@@ -20,6 +28,30 @@ std::atomic<int> completed_steps{0};
 std::atomic<int> total_steps{0};
 std::atomic<int64_t> latest_model_load_ms{0};
 std::atomic<int64_t> latest_sampling_ms{0};
+
+#if defined(NOVA_GPU_IMAGE_BACKEND)
+/* The native API returns actual device names (like OpenCL0), not generic "gpu".
+   Never silently run a CPU backend in place of a requested GPU. */
+std::string opencl_device() {
+    const size_t bytes = sd_list_devices(nullptr, 0);
+    if (!bytes || bytes > 32768) return "";
+    std::vector<char> buffer(bytes + 1, '\0');
+    sd_list_devices(buffer.data(), buffer.size());
+    std::istringstream lines(std::string(buffer.data()));
+    std::string line;
+    while (std::getline(lines, line)) {
+        const size_t tab = line.find('\t');
+        const std::string name = line.substr(0, tab);
+        std::string folded = line;
+        std::transform(folded.begin(), folded.end(), folded.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (name.empty() || name.size() > 128) continue;
+        if (folded.find("opencl") != std::string::npos ||
+            folded.find("adreno") != std::string::npos) return name;
+    }
+    return "";
+}
+#endif
 
 void throw_java(JNIEnv* env, const std::string& message) {
     jclass cls = env->FindClass("java/lang/IllegalStateException");
@@ -109,7 +141,7 @@ std::vector<uint8_t> copy_rgb(sd_image_t img, int size) {
 }  // namespace
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_ai_nova_image_NativeImageEngine_nativeGenerate(
+NOVA_JNI(nativeGenerate)(
     JNIEnv* env, jobject /*self*/, jstring modelPath,
     jstring prompt, jstring negativePrompt, jint size, jint steps, jlong seed) {
     try {
@@ -134,6 +166,12 @@ Java_ai_nova_image_NativeImageEngine_nativeGenerate(
         ctx_params.model_path = path.c_str();
         ctx_params.n_threads = 4;
         ctx_params.backend = "cpu";
+#if defined(NOVA_GPU_IMAGE_BACKEND)
+        const std::string gpu_name = opencl_device();
+        if (gpu_name.empty()) throw std::runtime_error(
+            "Adreno GPU backend недоступен: OpenCL не зарегистрирован в Stable Diffusion");
+        ctx_params.backend = gpu_name.c_str();
+#endif
         ctx_params.enable_mmap = true;
 
         sd_set_progress_callback(on_progress, nullptr);
@@ -194,7 +232,7 @@ Java_ai_nova_image_NativeImageEngine_nativeGenerate(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_ai_nova_image_NativeImageEngine_nativeCancel(
+NOVA_JNI(nativeCancel)(
     JNIEnv* /*env*/, jobject /*self*/) {
     cancel_requested.store(true);
     std::lock_guard<std::mutex> lock(active_mutex);
@@ -206,7 +244,7 @@ Java_ai_nova_image_NativeImageEngine_nativeCancel(
 }
 
 extern "C" JNIEXPORT jintArray JNICALL
-Java_ai_nova_image_NativeImageEngine_nativeProgress(
+NOVA_JNI(nativeProgress)(
     JNIEnv* env, jobject /*self*/) {
     jint values[2] = {completed_steps.load(), total_steps.load()};
     jintArray output = env->NewIntArray(2);
@@ -215,7 +253,7 @@ Java_ai_nova_image_NativeImageEngine_nativeProgress(
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
-Java_ai_nova_image_NativeImageEngine_nativeTimings(
+NOVA_JNI(nativeTimings)(
     JNIEnv* env, jobject /*self*/) {
     const jlong values[2] = {
         static_cast<jlong>(latest_model_load_ms.load()),
@@ -225,3 +263,15 @@ Java_ai_nova_image_NativeImageEngine_nativeTimings(
     if (output) env->SetLongArrayRegion(output, 0, 2, values);
     return output;
 }
+
+#if defined(NOVA_GPU_IMAGE_BACKEND)
+extern "C" JNIEXPORT jstring JNICALL
+Java_ai_nova_image_NativeGpuImageEngine_nativeGpuDevice(JNIEnv* env, jobject /*self*/) {
+    try {
+        const std::string name = opencl_device();
+        return env->NewStringUTF(name.empty() ? "" : name.c_str());
+    } catch (...) {
+        return env->NewStringUTF("");
+    }
+}
+#endif
