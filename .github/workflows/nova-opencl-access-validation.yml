@@ -1,0 +1,60 @@
+name: NOVA - Android vendor OpenCL access validation
+on:
+  push:
+    branches: [fix/nova-opencl-android-visibility]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nova-opencl-access-validation
+  cancel-in-progress: true
+jobs:
+  verify-cpu-safe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Android NDK and CMake
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+      - name: Run all NOVA tests
+        run: |
+          npm ci
+          node --test tests/*.test.cjs
+      - name: Compile safe CPU build and run Kotlin tests
+        run: |
+          npx cap sync android
+          cd android
+          bash gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Check final merged APK manifest contains optional libOpenCL
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOL="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$TOOL/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -A 5 -B 2 'libOpenCL.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+      # The APK is a CI test only; releases remain in the owner-signed Stable workflow.
