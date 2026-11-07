@@ -1,12 +1,12 @@
 name: NOVA Adreno - dual CPU and GPU renderers CI
 on:
   push:
-    branches: [feature/nova-adreno-dual-engine, fix/nova-gpu-blank-output-guard, fix/nova-story-prompt-priority-and-preservation]
+    branches: [feature/nova-adreno-dual-engine, fix/nova-gpu-blank-output-guard, fix/nova-story-prompt-priority-and-preservation, fix/nova-six-integrate-offline-story-backup]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: nova-adreno-dual-renderer
+  group: nova-adreno-dual-renderer-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   compile-dual-engine:
