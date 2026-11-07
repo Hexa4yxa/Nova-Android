@@ -5,15 +5,28 @@ package ai.nova.image
  * A driver/load failure here must never prevent CPU images or chat from working.
  */
 object NativeGpuImageEngine {
-    private val error: String? = try {
-        System.loadLibrary("nova-image-gpu")
-        null
-    } catch (t: Throwable) {
-        (t.message ?: t.javaClass.simpleName).take(350)
+    // Merely opening NOVA or Brains must never load the experimental driver.
+    // Only the owner-approved GPU test may attempt native initialization.
+    @Volatile private var loaded = false
+    @Volatile private var loadError: String? = null
+    private var loadAttempted = false
+
+    @Synchronized
+    fun enableForApprovedTest(): Boolean {
+        if (!loadAttempted) {
+            loadAttempted = true
+            try {
+                System.loadLibrary("nova-image-gpu")
+                loaded = true
+            } catch (t: Throwable) {
+                loadError = (t.message ?: t.javaClass.simpleName).take(350)
+            }
+        }
+        return loaded
     }
 
-    fun libraryReady(): Boolean = error == null
-    fun libraryError(): String? = error
+    fun libraryReady(): Boolean = loaded
+    fun libraryError(): String? = loadError
 
     /** The real OpenCL backend registered in stable-diffusion.cpp, not merely an Android driver. */
     fun gpuDevice(): String = if (libraryReady()) try {
@@ -29,7 +42,7 @@ object NativeGpuImageEngine {
         steps: Int,
         seed: Long
     ): ByteArray {
-        check(libraryReady()) { error ?: "Библиотека GPU недоступна" }
+        check(libraryReady()) { libraryError() ?: "GPU тест ещё не запускался" }
         check(gpuDevice().isNotBlank()) { "OpenCL обнаружен телефоном, но движок SD не зарегистрировал GPU" }
         require(size in listOf(256, 512))
         require(steps in 1..30)
