@@ -37,7 +37,7 @@ std::string opencl_device() {
     if (!bytes || bytes > 32768) return "";
     std::vector<char> buffer(bytes + 1, '\0');
     sd_list_devices(buffer.data(), buffer.size());
-    std::istringstream lines(std::string(buffer.data()));
+    std::istringstream lines{std::string(buffer.data())};
     std::string line;
     while (std::getline(lines, line)) {
         const size_t tab = line.find('\t');
