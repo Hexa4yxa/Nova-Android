@@ -124,6 +124,7 @@ class NovaImagePlugin : Plugin() {
             call.resolve(JSObject().apply {
                 put("ready", error == null && model != null)
                 put("backend", "NOVA Native Image CPU")
+                put("gpuProbe", NativeImageEngine.gpuProbe())
                 put("generating", generating.get())
                 put("selectedId", model ?: "")
                 put("testedOnDevice", verified(model))
