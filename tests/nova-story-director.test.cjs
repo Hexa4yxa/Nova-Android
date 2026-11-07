@@ -23,6 +23,8 @@ test('Gemma receives full story idea and consistent character/scene instructions
  const prompt=story.ideaRequest('История про двойника в старом зеркале и человека, который его видит');
  assert.match(prompt,/двойника в старом зеркале/);
  assert.match(prompt,/One single protagonist look across all scenes/);
+ assert.match(prompt,/actual scene subject and setting BEFORE decorative style/);
+ assert.match(prompt,/objects, architecture, geography and spatial relations/);
  assert.match(prompt,/exactly 3 scenes/);
  assert.throws(()=>story.ideaRequest('Кот'),/идею истории/);
 });
@@ -30,14 +32,43 @@ test('Gemma receives full story idea and consistent character/scene instructions
 test('Gemma produces offline scene plan with shared continuity and English image prompts',()=>{
  const result=story.parse('Here is JSON: '+valid,'История про зеркало');
  assert.equal(result.scenes.length,3);
- assert.match(result.scenes[0].prompt,/Same protagonist: young man with short dark hair/i);
- assert.match(result.scenes[2].prompt,/Visual continuity: moody cinematic horror/);
+ assert.match(result.scenes[0].prompt,/same protagonist: young man with short dark hair/i);
+ assert.ok(result.scenes[0].prompt.startsWith('A young man wearing a grey jacket enters an abandoned house'));
+ assert.ok(result.scenes[0].prompt.indexOf('enters an abandoned house') < result.scenes[0].prompt.indexOf('same protagonist:'));
+ assert.ok(result.scenes[1].prompt.indexOf('looks into a mirror') < result.scenes[1].prompt.indexOf('visual continuity:'));
+
+ assert.match(result.scenes[2].prompt,/visual continuity: moody cinematic horror/);
  assert.match(result.scenes[1].prompt,/looks into a mirror/);
  assert.ok(result.scenes.every(s=>s.prompt.length<=590));
  assert.ok(result.scenes.every(s=>!s.imageUri));
  assert.ok(story.write([result]));
  assert.equal(story.read().length,1);
  assert.equal(story.read()[0].scenes[2].beat,'Отражение улыбается');
+});
+
+test('NOVA never drops old projects after the sixth saved story',()=>{
+ const payload=Array.from({length:9},(_,i)=>Object.assign(
+  story.parse(valid,'История '+i),{id:'story-test-'+i}
+ ));
+ assert.ok(story.write(payload));
+ const saved=story.read();
+ assert.equal(saved.length,9);
+ assert.equal(saved[0].id,'story-test-0');
+ assert.equal(saved[8].id,'story-test-8');
+});
+
+test('Long scene prompts prioritize the main shot without chopping words',()=>{
+ const obj=JSON.parse(valid);
+ obj.hero='traveler with pale complexion and long dark coat, wearing a wool scarf, carrying an old leather satchel through the frozen countryside';
+ obj.style='moody atmospheric cinematic photographic style, gentle film grain, low contrast backlighting, blue winter shadows';
+ obj.scenes[0].prompt='A weathered coastal lighthouse rises above the stormy sea, towering over the jagged cliff, as a lone traveler discovers a stone staircase carved into the rock. Wide shot, visible ocean and lighthouse, long rolling waves. '.repeat(3);
+ const output=story.parse(JSON.stringify(obj),'Маяк у моря');
+ const prompt=output.scenes[0].prompt;
+ assert.ok(prompt.startsWith('A weathered coastal lighthouse rises above the stormy sea'));
+ assert.ok(prompt.includes('jagged cliff'));
+ assert.ok(prompt.includes('same protagonist:'));
+ assert.ok(prompt.includes('visual continuity:'));
+ assert.ok(prompt.length<=590);
 });
 
 test('Invalid or Cyrillic image prompt does not launch an expensive SD render',()=>{
