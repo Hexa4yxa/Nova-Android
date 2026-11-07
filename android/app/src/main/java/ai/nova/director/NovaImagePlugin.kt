@@ -283,6 +283,8 @@ class NovaImagePlugin : Plugin() {
             .ifBlank { "blurred, distorted face, bad anatomy, watermark, text" }
         val size = call.getInt("size") ?: 256
         val steps = call.getInt("steps") ?: 12
+        // Optional deterministic seed for CPU/GPU quality comparison. Default behavior is unchanged.
+        val seed = call.getInt("seed")?.toLong() ?: System.currentTimeMillis()
         if (prompt.length !in 5..600 || negative.length > 400 ||
             size !in listOf(256, 512) || steps !in 1..30) {
             call.reject("Проверь описание, размер 256/512 и число шагов 1–30")
@@ -328,7 +330,7 @@ class NovaImagePlugin : Plugin() {
             }
             try {
                 val rgb = NativeImageEngine.generate(
-                    file.absolutePath, prompt, negative, size, steps, System.currentTimeMillis()
+                    file.absolutePath, prompt, negative, size, steps, seed
                 )
                 require(rgb.size == size * size * 3) { "Неполные пиксели изображения" }
                 val timing = NativeImageEngine.timings()
@@ -351,6 +353,7 @@ class NovaImagePlugin : Plugin() {
                         put("preview", "data:image/png;base64," +
                             Base64.encodeToString(png, Base64.NO_WRAP))
                         put("backend", "NOVA Native CPU")
+                        put("seed", seed)
                         put("modelLoadMs", timing.getOrElse(0) { 0L })
                         put("samplingMs", timing.getOrElse(1) { 0L })
                     })
