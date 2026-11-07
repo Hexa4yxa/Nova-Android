@@ -33,7 +33,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: db3414aec776861dc02c82769649542d6ada8c0a
+          ref: 0740da3fa441e3b639d7e559a813078bab1971fc
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -50,6 +50,22 @@ jobs:
           ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
           path: android/stable-diffusion.cpp
           submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout pinned Khronos OpenCL Headers
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/OpenCL-Headers
+          ref: v2026.05.29
+          path: opencl-headers
+          persist-credentials: false
+
+      - name: Checkout pinned Khronos ICD Loader - build-time only
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/OpenCL-ICD-Loader
+          ref: v2026.05.29
+          path: opencl-loader
           persist-credentials: false
 
       - name: Set up Java 21
@@ -105,6 +121,12 @@ jobs:
         run: |
           node --test tests/*.test.cjs
 
+      # Opt-in GPU engine is an independent native library. Normal 512x512 CPU
+      # path and Gemma stay unchanged. An OpenCL/NDK failure MUST abort release.
+      - name: Build isolated experimental Adreno OpenCL renderer
+        shell: bash
+        run: bash scripts/build-nova-adreno.sh
+
       - name: Set monotonically increasing stable version
         shell: bash
         run: echo "NOVA_STABLE_VERSION_CODE=$((200000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
@@ -124,6 +146,11 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image-gpu.so'
+          if unzip -l "$APK" | grep -F 'lib/arm64-v8a/libOpenCL.so'; then
+            echo "::error::Do not package a non-vendor OpenCL loader."
+            exit 1
+          fi
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           test -x "$BUILD_TOOLS/apksigner"
           test -x "$BUILD_TOOLS/aapt"
@@ -167,7 +194,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "First-time migration from debug NOVA 1.0.1-nativeimage: this Stable APK has a separate app ID and does not overwrite the old installation. Preserve the old app until Gemma and SD1.5 are imported from Download/NOVA-Models and tested. Future Official Stable versions update in place. Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
+            --notes "First-time migration from debug NOVA 1.0.1-nativeimage: this Stable APK has a separate app ID and does not overwrite the old installation. Preserve the old app until Gemma and SD1.5 are imported from Download/NOVA-Models and tested. Future Official Stable versions update in place. Permanent package: ai.nova.director.stable. Signed with the owner's stable key from GitHub Actions secrets. Future stable releases use the SAME key and increasing version codes for in-place updates. First install is side-by-side with old test APKs due to their incompatible ephemeral debug signatures. Restore SD1.5 using NOVA → Мозги → Восстановить из NOVA-Models (system picker; SHA-256 verified). Experimental opt-in Adreno GPU smoke test (256x256, one step) is separate: regular image generation remains on CPU until real phone validation. No GPU speedup is claimed. DO NOT uninstall old NOVA or remove backed-up models until the new stable app is verified on the phone." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
