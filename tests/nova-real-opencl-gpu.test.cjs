@@ -63,6 +63,19 @@ test('reject solid white GPU readback before claiming success or saving PNG',()=
  assert.ok(gpuTrial.indexOf('require(maximum - minimum >= 8)') < gpuTrial.indexOf('val bitmap = Bitmap.createBitmap'));
 });
 
+test('Adreno 810 lockout happens before native OpenCL load and hides risky UI',()=>{
+ const trial=plugin.slice(plugin.indexOf('fun gpuQuickTest('),plugin.indexOf('private fun savePng('));
+ assert.ok(trial.includes('val gpuDriver = NativeImageEngine.gpuProbe()'));
+ assert.ok(trial.includes('containsMatchIn(gpuDriver)'));
+ assert.ok(trial.includes('GPU-тест на Adreno 810 временно отключён'));
+ assert.ok(trial.indexOf('val gpuDriver = NativeImageEngine.gpuProbe()') <
+   trial.indexOf('NativeGpuImageEngine.enableForApprovedTest()'));
+ assert.ok(html.includes('const unsafeAdreno810='));
+ assert.ok(html.includes('if(unsafeAdreno810){'));
+ assert.ok(html.includes('Тест Adreno 810 отключён'));
+ assert.ok(html.indexOf('if(unsafeAdreno810){') < html.indexOf("const gpuTest=add("));
+});
+
 test('GPU staging intentionally omits Khronos ICD loader and separate APKs',()=>{
  assert.match(build,/target nova-image-gpu --parallel 2/);
  assert.match(build,/STAGING=".*android\/app\/src\/main\/jniLibs\/arm64-v8a"/);
