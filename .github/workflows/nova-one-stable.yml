@@ -33,7 +33,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: 583c621b9e7109a69b7eedacedae9aa060e40877
+          ref: a327a8142ff83cc6c8a804b59f37683544e97647
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -170,7 +170,11 @@ jobs:
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep "package: name='ai.nova.director.stable'"
           mkdir -p release
           cp "$APK" release/NOVA-Official-Stable.apk
-          sha256sum release/NOVA-Official-Stable.apk > release/SHA256SUMS.txt
+          # Use a relative APK name so the hash works after ZIP extraction.
+          (cd release && sha256sum NOVA-Official-Stable.apk > SHA256SUMS.txt)
+          # Fallback for browsers that stall when saving a direct .apk.
+          (cd release && zip -q -9 NOVA-Official-Stable-ZIP.zip NOVA-Official-Stable.apk SHA256SUMS.txt)
+          unzip -t release/NOVA-Official-Stable-ZIP.zip
 
       # Preserve the verified signed APK independently of Releases write access.
       # Artifact upload uses the Actions artifact service and does not include
@@ -192,9 +196,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt \
+          gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt release/NOVA-Official-Stable-ZIP.zip \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable #6 upgrades the SAME owner-signed Android package ai.nova.director.stable in place. Do not uninstall previous Stable or clear app data: imported SD1.5, Gemma, projects and gallery pictures must be kept. Upgrades: preserve all story projects instead of last six, shot-first cinematic prompts, and offline story JSON backup/import through Android document picker. CPU drawing remains unchanged. The real-device Adreno 810 OpenCL GPU test is blocked after a blank output and SystemUI hang; do not attempt GPU trials until validated. Signed with the existing pinned owner certificate; automatically checked by CI before release." \
+            --notes "NOVA Official Stable: chat requests like Придумай историю и сделай картинки now create a saved three-scene project and invoke the real offline SD 1.5 generator for each scene. Three pictures are reported finished only after native PNG save confirmation. Existing projects, Gemma and models stay in place. Regular chat remains unchanged. Owner certificate and stable Android package verified by CI. Drawing uses safe CPU by default; do not enable experimental Adreno GPU after previous device instability. If Android browser stalls downloading APK, download NOVA-Official-Stable-ZIP.zip and extract NOVA-Official-Stable.apk via the file manager. Do not uninstall NOVA or clear app data." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
