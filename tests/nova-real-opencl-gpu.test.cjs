@@ -57,9 +57,9 @@ test('Adreno quick test is opt-in, 256px, single step, same existing model',()=>
 
 test('reject solid white GPU readback before claiming success or saving PNG',()=>{
  const gpuTrial=plugin.slice(plugin.indexOf('fun gpuQuickTest('),plugin.indexOf('private fun savePng('));
- assert.match(gpuTrial,/for \\(channel in rgb\\)/);
- assert.match(gpuTrial,/require\\(maximum - minimum >= 8\\)/);
- assert.match(gpuTrial,/GPU вернул одноцветный кадр/);
+ assert.ok(gpuTrial.includes('for (channel in rgb)'));
+ assert.ok(gpuTrial.includes('require(maximum - minimum >= 8)'));
+ assert.ok(gpuTrial.includes('GPU вернул одноцветный кадр'));
  assert.ok(gpuTrial.indexOf('require(maximum - minimum >= 8)') < gpuTrial.indexOf('val bitmap = Bitmap.createBitmap'));
 });
 
