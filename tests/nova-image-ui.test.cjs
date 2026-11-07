@@ -61,3 +61,26 @@ test('quality path uses the actual offline image engine and optional LLM scene p
  assert.match(js,/imageLastResult\?\.saved/);
  assert.match(js,/Вот результат/);
 });
+
+
+test('combined story and illustration request routes to native image engine',()=>{
+ const routeSource=js.match(/function wantsStoryImages\(text\)\{[\s\S]*?\n\}/)?.[0];
+ const sceneSource=js.match(/function storyFramePrompts\(story\)\{[\s\S]*?\n\}/)?.[0];
+ assert.ok(routeSource&&sceneSource,'story route helpers exist');
+ const wants=vm.runInNewContext(routeSource+'; wantsStoryImages');
+ const scenes=vm.runInNewContext(sceneSource+'; storyFramePrompts');
+ assert.equal(wants('Придумай историю веселую. И сделай к ним картинки'),true);
+ assert.equal(wants('Сочини сказку и нарисуй иллюстрации'),true);
+ assert.equal(wants('Вигадай історію та зроби малюнки'),true);
+ assert.equal(wants('Привет, как дела?'),false);
+ assert.equal(wants('Нарисуй картинку'),false);
+ const shots=scenes('Весёлая история\nСцена 1: Профессор в космосе\nСцена 2: Робот танцует\nСцена 3: Космический пончик');
+ assert.equal(shots.length,3);
+ assert.equal(shots[0],'Профессор в космосе');
+ assert.deepEqual(Array.from(scenes('[Создаю изображение: робот в космосе]')),['робот в космосе']);
+ assert.match(js,/const storyImages=wantsStoryImages\(text\)/);
+ assert.match(js,/await brain\.chat\(\{message:storyRequest,requestId\}\)/);
+ assert.match(js,/await generateStoryFrames\(waiting\.text\)/);
+ assert.match(js,/await executeImageGeneration\(frames\[index\]/);
+ assert.match(js,/await image\?\.cancel\?\.\(\)/);
+});
