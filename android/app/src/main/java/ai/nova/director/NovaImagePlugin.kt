@@ -391,7 +391,7 @@ class NovaImagePlugin : Plugin() {
         }
         val file = selected()?.let { find(it) }
         if (file == null) { call.reject("Сначала подключи SD 1.5"); return }
-        if (!NativeGpuImageEngine.libraryReady()) {
+        if (!NativeGpuImageEngine.enableForApprovedTest()) {
             call.reject("GPU-библиотека недоступна: " + (NativeGpuImageEngine.libraryError() ?: "неизвестная ошибка"))
             return
         }
