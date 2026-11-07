@@ -437,6 +437,20 @@ class NovaImagePlugin : Plugin() {
                 val rgb = NativeGpuImageEngine.generate(file.absolutePath,
                     testPrompt, "blurry, watermark, text", 256, 1, 4242L)
                 require(rgb.size == 256 * 256 * 3) { "GPU не вернул полный RGB-кадр" }
+                // A completed sampler step is not evidence of a valid picture.
+                // Fail closed on entirely white/black/flat GPU readback, never
+                // save it as a successful GPU render or claim acceleration.
+                var minimum = 255
+                var maximum = 0
+                for (channel in rgb) {
+                    val value = channel.toInt() and 0xff
+                    if (value < minimum) minimum = value
+                    if (value > maximum) maximum = value
+                }
+                require(maximum - minimum >= 8) {
+                    "GPU вернул одноцветный кадр. OpenCL результат недействителен. " +
+                    "Не повторяй GPU-тест до проверки драйвера."
+                }
                 val timing = NativeGpuImageEngine.timings()
                 val pixels = NovaImagePixels.toArgb(rgb, 256, 256)
                 val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
