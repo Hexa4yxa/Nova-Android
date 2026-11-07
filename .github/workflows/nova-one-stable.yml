@@ -52,22 +52,6 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Checkout pinned Khronos OpenCL Headers
-        uses: actions/checkout@v4
-        with:
-          repository: KhronosGroup/OpenCL-Headers
-          ref: v2026.05.29
-          path: opencl-headers
-          persist-credentials: false
-
-      - name: Checkout pinned Khronos ICD Loader - build-time only
-        uses: actions/checkout@v4
-        with:
-          repository: KhronosGroup/OpenCL-ICD-Loader
-          ref: v2026.05.29
-          path: opencl-loader
-          persist-credentials: false
-
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
@@ -121,11 +105,9 @@ jobs:
         run: |
           node --test tests/*.test.cjs
 
-      # Opt-in GPU engine is an independent native library. Normal 512x512 CPU
-      # path and Gemma stay unchanged. An OpenCL/NDK failure MUST abort release.
-      - name: Build isolated experimental Adreno OpenCL renderer
-        shell: bash
-        run: bash scripts/build-nova-adreno.sh
+      # Official light package intentionally omits the experimental GPU .so.
+      # Adreno 810 has not passed device validation; the proven CPU renderer,
+      # offline Gemma and full story/project features are unchanged.
 
       - name: Set monotonically increasing stable version
         shell: bash
@@ -146,11 +128,22 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
-          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image-gpu.so'
+          if unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnova-image-gpu.so'; then
+            echo "::error::Light release must not package the experimental Adreno GPU renderer."
+            exit 1
+          fi
           if unzip -l "$APK" | grep -F 'lib/arm64-v8a/libOpenCL.so'; then
             echo "::error::Do not package a non-vendor OpenCL loader."
             exit 1
           fi
+          # Older CPU-only releases were ~116 MB. Fail instead of publishing
+          # another huge APK if unnecessary native dependencies slip back in.
+          APK_BYTES="$(stat -c%s "$APK")"
+          if [ "$APK_BYTES" -gt 150000000 ]; then
+            echo "::error::Light NOVA APK unexpectedly exceeds 150 MB: $APK_BYTES bytes."
+            exit 1
+          fi
+          echo "CPU-only NOVA package size: $APK_BYTES bytes"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           test -x "$BUILD_TOOLS/apksigner"
           test -x "$BUILD_TOOLS/aapt"
@@ -198,7 +191,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt release/NOVA-Official-Stable-ZIP.zip \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable: chat requests like Придумай историю и сделай картинки now create a saved three-scene project and invoke the real offline SD 1.5 generator for each scene. Three pictures are reported finished only after native PNG save confirmation. Existing projects, Gemma and models stay in place. Regular chat remains unchanged. Owner certificate and stable Android package verified by CI. Drawing uses safe CPU by default; do not enable experimental Adreno GPU after previous device instability. If Android browser stalls downloading APK, download NOVA-Official-Stable-ZIP.zip and extract NOVA-Official-Stable.apk via the file manager. Do not uninstall NOVA or clear app data." \
+            --notes "NOVA Official Stable LIGHT: smaller CPU-only update to avoid the previous 183 MB downloads. The unfinished experimental Adreno renderer is NOT bundled. Offline Gemma, project history, existing SD 1.5, native CPU image creation, and chat story-to-three-real-frames workflow are preserved. This is the SAME owner-signed ai.nova.director.stable app and upgrades in place. Do NOT uninstall or clear app data. Download NOVA-Official-Stable.apk or the smaller ZIP alternative if the Android browser does not finalize APK downloads." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
