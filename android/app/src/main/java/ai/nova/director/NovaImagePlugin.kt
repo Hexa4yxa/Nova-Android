@@ -389,6 +389,16 @@ class NovaImagePlugin : Plugin() {
             call.reject("GPU-тест запускается только после подтверждения")
             return
         }
+        // Real-device regression: Adreno 810 returned a flat white PNG and
+        // SystemUI became unresponsive. Stop *before* loading the OpenCL
+        // library, not only after image readback. CPU remains available.
+        val gpuDriver = NativeImageEngine.gpuProbe()
+        if (gpuDriver.contains("Adreno", ignoreCase = true) &&
+            Regex("""\\b810\\b""").containsMatchIn(gpuDriver)) {
+            call.reject("GPU-тест на Adreno 810 временно отключён после зависания Android. " +
+                "Используй безопасную генерацию CPU; модель и проекты сохранены.")
+            return
+        }
         val file = selected()?.let { find(it) }
         if (file == null) { call.reject("Сначала подключи SD 1.5"); return }
         if (!NativeGpuImageEngine.enableForApprovedTest()) {
