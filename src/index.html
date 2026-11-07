@@ -622,7 +622,64 @@ async function showBrainManager(){
       add(resourceBox,'p','brain-caption','💾 Свободно RAM: '+Math.floor(free)+' МиБ. Перед рисованием NOVA освобождает память текстовой модели.');
      }
      if(resources.gpuProbe){
-      add(resourceBox,'p','brain-caption','🧪 GPU: '+resources.gpuProbe+'. Пока генерация на CPU; это проверка доступности драйвера, не ускорение.');
+      add(resourceBox,'p','brain-caption','🧪 GPU драйвер: '+resources.gpuProbe);
+     }
+     if(resources.gpuProbe && resources.gpuProbe.toLowerCase().includes('adreno')){
+      add(resourceBox,'p','brain-caption',resources.gpuEngineDevice?
+       '✅ SD OpenCL backend: '+resources.gpuEngineDevice+' · Обычная генерация остаётся на CPU.':
+       '🧪 Пока генерация на CPU. OpenCL пока не запускался. Драйвер GPU загрузится только после твоего подтверждения теста.');
+      add(imageToolsBox,'p','brain-caption','Один шаг — только короткая проверка OpenCL. PNG может выглядеть черновым; качество обычного рисования не меняется.');
+      const gpuTest=add(imageToolsBox,'button','council-button','🧪 Испытать Adreno · 256×256 · 1 шаг');
+      const gpuCancel=add(imageToolsBox,'button','council-button','⏹ Остановить GPU-тест');
+      gpuCancel.disabled=true;
+      gpuCancel.onclick=async()=>{
+       gpuCancel.disabled=true;
+       imageTestStatus.textContent='⏹ Запрашиваю отмену GPU-теста...';
+       try{await image.cancel();}catch(e){imageTestStatus.textContent='⚠ Отмена: '+(e?.message||String(e));}
+      };
+      gpuTest.disabled=!!(imageBusy||resources.generating);
+      gpuTest.onclick=async()=>{
+       if(imageBusy)return;
+       if(!confirm('Провести короткий тест GPU: SD 1.5 FP16, 256×256 и 1 шаг? Результат сохранится в Галерее. В обычной NOVA CPU останется основным.'))return;
+       const brain=window.Capacitor?.Plugins?.NovaBrain;
+       if(!brain){imageTestStatus.textContent='⚠ Нет менеджера памяти NOVA.';return;}
+       imageBusy=true;
+       gpuTest.disabled=true;
+       let reserved=false;
+       let progress=null;
+       try{
+        imageTestStatus.textContent='🧠 Освобождаю память Gemma для испытания Adreno...';
+        await brain.releaseForImage();
+        reserved=true;
+        progress=await image.addListener('novaImageProgress',p=>{
+         imageTestStatus.textContent='🎨 OpenCL GPU: '+(p.step||0)+' / '+(p.total||1)+' шаг';
+        });
+        imageTestStatus.textContent='🧪 Загружаю SD 1.5 на OpenCL GPU и выполняю один шаг...';
+        gpuCancel.disabled=false;
+        const result=await image.gpuQuickTest({approved:true});
+        imageTestStatus.textContent='✅ Реальная GPU-генерация завершилась! Загрузка модели: '+
+          (Number(result.modelLoadMs||0)/1000).toFixed(1)+' с, вычисление: '+
+          (Number(result.samplingMs||0)/1000).toFixed(1)+' с. PNG сохранён в Галерею.';
+        imageTestPreview.replaceChildren();
+        if(result.preview){
+         const img=add(imageTestPreview,'img','nova-image-preview');
+         img.alt='Короткий тест реальной генерации Adreno';
+         img.src=result.preview;
+        }
+       }catch(e){
+        imageTestStatus.textContent='⚠ GPU-тест: '+(e?.message||String(e))+
+          '. Обычный CPU-генератор не изменён.';
+       }finally{
+        try{await progress?.remove();}catch(_){}
+        if(reserved)try{await brain.finishImageWork();}catch(_){}
+        imageBusy=false;
+        gpuTest.disabled=false;
+        gpuCancel.disabled=true;
+       }
+      };
+     }else{
+      add(resourceBox,'p','brain-caption','ℹ GPU движок не готов: '+(resources.gpuEngineError||
+        'OpenCL устройство не зарегистрировано')+'. CPU-генерация доступна.');
      }
      if(resources.resourceWarning){
       imageState.textContent+=' · ⚠ '+resources.resourceWarning;

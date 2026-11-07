@@ -1,0 +1,88 @@
+name: NOVA Adreno - dual CPU and GPU renderers CI
+on:
+  push:
+    branches: [feature/nova-adreno-dual-engine]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nova-adreno-dual-renderer
+  cancel-in-progress: true
+jobs:
+  compile-dual-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout NOVA source
+        uses: actions/checkout@v4
+      - name: Checkout pinned llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+      - name: Checkout pinned stable-diffusion.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+      - name: Checkout pinned Khronos OpenCL Headers
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/OpenCL-Headers
+          ref: v2026.05.29
+          path: opencl-headers
+          persist-credentials: false
+      - name: Checkout pinned Khronos ICD Loader - build-time only
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/OpenCL-ICD-Loader
+          ref: v2026.05.29
+          path: opencl-loader
+          persist-credentials: false
+      - name: Install Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned Android NDK and CMake
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+      - name: Run NOVA full regression suite
+        run: |
+          npm ci
+          node --test tests/*.test.cjs
+      - name: Compile isolated real OpenCL renderer and stage native GPU library
+        run: bash scripts/build-nova-adreno.sh
+      - name: Compile same NOVA Android APK with both CPU and GPU libraries
+        run: |
+          npx cap sync android
+          cd android
+          bash gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Inspect native symbols and APK packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnova-image.so'
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnova-image-gpu.so'
+          if unzip -l "$APK" | grep -F 'lib/arm64-v8a/libOpenCL.so'; then
+            echo "::error::Must not ship the non-vendor Khronos ICD loader into Android APK"
+            exit 1
+          fi
+          ELF="$ANDROID_HOME/ndk/29.0.13113456/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          "$ELF" -D android/app/src/main/jniLibs/arm64-v8a/libnova-image-gpu.so | grep 'Java_ai_nova_image_NativeGpuImageEngine_nativeGenerate'
+          "$ELF" -D android/app/src/main/jniLibs/arm64-v8a/libnova-image-gpu.so | grep 'Java_ai_nova_image_NativeGpuImageEngine_nativeGpuDevice'
+          echo "CPU/GPU dual engine Android APK CI verified. No APK is distributed or installed."
+      # No release, no signing, no user device actions. Stable keeps owner signer.
