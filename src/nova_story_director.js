@@ -14,9 +14,11 @@ function ideaRequest(idea,count=3) {
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
   '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
   'Make exactly '+number+' scenes. One single protagonist look across all scenes.',
-  'Each English prompt must name the protagonist and explain a concrete visible ACTION, location, framing and light.',
+  'Each English prompt must START with a concrete visible subject doing an ACTION in a specific LOCATION, then framing and light.',
+  'Preserve user-mentioned objects, architecture, geography and spatial relations in the relevant scenes. Do not replace them with generic scenery.',
+  'Place the actual scene subject and setting BEFORE decorative style or character-consistency notes so SD 1.5 sees them first.',
   'Each scene changes an action while preserving person, outfit, era, atmosphere.',
-  'Keep prompts concise (under 145 English words each). No self-references, no imaginary image output.',
+  'Keep each scene prompt within 45-55 English words. SD 1.5 has a limited text context; key details must come first. No self-references or imaginary image output.',
   'Do not describe actual violence or pornography. No explanations outside JSON.'
  ].join('\n');
 }
@@ -27,6 +29,14 @@ function extract(raw){
  try{return JSON.parse(text.slice(start,end+1))}catch(_){throw Error('Gemma вернула неполный JSON-план. Повтори подготовку сцен.');}
 }
 function english(s) {return /[a-z]/i.test(s)&&!/[а-яёіїєґ]/iu.test(s)}
+// Trim only at word boundaries: never cut a cinematography term in half.
+function clipWords(value,maxLength) {
+ const str=String(value||'').trim();
+ if(str.length<=maxLength)return str;
+ const slice=str.slice(0,maxLength);
+ const cut=slice.lastIndexOf(' ');
+ return (cut>0?slice.slice(0,cut):slice).replace(/[.,;:\s]+$/,'');
+}
 function validate(result,original) {
  if(!result||typeof result!=='object'||!Array.isArray(result.scenes))throw Error('Не удалось получить список сцен.');
  const title=clean(result.title,100);
@@ -37,9 +47,15 @@ function validate(result,original) {
    if(!x||typeof x!=='object')throw Error('Сцена содержит неверные данные.');
    const beat=clean(x.beat,240), rawPrompt=clean(x.prompt,470);
    if(!beat||!english(rawPrompt)||rawPrompt.length<25)throw Error('Сцена '+(i+1)+': нужен понятный английский промпт.');
-   // Shared anchors go into EVERY prompt for better consistency.
-   const anchor='Same protagonist: '+hero+'. Visual continuity: '+style+'. ';
-   const prompt=(anchor+rawPrompt).slice(0,590);
+   // SD 1.5's text context is limited. Put the scene-specific subject,
+   // action and location FIRST, and continuity anchors AFTER them.
+   // Otherwise the tokenizer may drop the real action at the end.
+   const shot=clipWords(rawPrompt,360);
+   const heroAnchor=clipWords(hero,100);
+   const styleAnchor=clipWords(style,75);
+   const prompt=shot+', same protagonist: '+heroAnchor+
+     ', visual continuity: '+styleAnchor;
+   if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
    return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0};
  });
@@ -53,13 +69,15 @@ function read(){
  try{
   const saved=JSON.parse(localStorage.getItem(KEY)||'[]');
   if(!Array.isArray(saved))return [];
+  // Never discard the owner's older projects when a seventh story is created.
   return saved.filter(x=>x&&typeof x==='object'&&typeof x.id==='string'&&
-    typeof x.title==='string'&&Array.isArray(x.scenes)&&x.scenes.length<=3).slice(-6);
+    typeof x.title==='string'&&Array.isArray(x.scenes)&&x.scenes.length<=3);
  }catch(_){return []}
 }
 function write(stories) {
- const list=stories.slice(-6);
- try{localStorage.setItem(KEY,JSON.stringify(list));return true}
+ // Keep every project. If device storage is full, report failure instead of
+ // silently removing any of the owner's previous work.
+ try{localStorage.setItem(KEY,JSON.stringify(stories));return true}
  catch(_){return false}
 }
 root.NovaStoryDirector=Object.freeze({ideaRequest,parse,read,write});
