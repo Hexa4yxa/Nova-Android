@@ -33,6 +33,18 @@ set(SD_VULKAN OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 
+# EXPERIMENT ONLY. Qualcomm Snapdragon 7s Gen 4 uses ARMv8.2+ features.
+# Keep standard NOVA binary unchanged until a same-prompt device A/B benchmark
+# confirms speed, thermals and valid pixel output. No GPU dependency.
+option(NOVA_CPU_ARM_FP16_DOTPROD "Experimental arm64 CPU FP16 and dotprod tuned kernels" OFF)
+if(NOVA_CPU_ARM_FP16_DOTPROD)
+    if(NOT ANDROID OR NOT ANDROID_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "CPU FP16/DOTPROD experiment requires Android arm64-v8a")
+    endif()
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "Experimental CPU target" FORCE)
+    message(STATUS "NOVA CPU SIMD experiment: GGML_CPU_ARM_ARCH=${GGML_CPU_ARM_ARCH}")
+endif()
+
 add_subdirectory("${SD_SRC}" "${CMAKE_CURRENT_BINARY_DIR}/sd" EXCLUDE_FROM_ALL)
 
 # Two independent libraries: the signed NOVA keeps its original CPU renderer.
