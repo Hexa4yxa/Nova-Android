@@ -33,7 +33,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: a327a8142ff83cc6c8a804b59f37683544e97647
+          ref: 8959fd9435263f9e92f72d8e8c6fd23e2c6e287b
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -191,7 +191,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt release/NOVA-Official-Stable-ZIP.zip \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable LIGHT: smaller CPU-only update to avoid the previous 183 MB downloads. The unfinished experimental Adreno renderer is NOT bundled. Offline Gemma, project history, existing SD 1.5, native CPU image creation, and chat story-to-three-real-frames workflow are preserved. This is the SAME owner-signed ai.nova.director.stable app and upgrades in place. Do NOT uninstall or clear app data. Download NOVA-Official-Stable.apk or the smaller ZIP alternative if the Android browser does not finalize APK downloads." \
+            --notes "NOVA Official Stable: lightweight owner-signed CPU-only update to restore unfinished story image generation after Android app/WebView interruption. Existing completed frames are skipped and are NEVER rerendered automatically. In Projects, tap Continue from frame 2 to resume saved story, with a Stop button. Images and stories remain in Galleries and Projects. Progress now distinguishes backend operations from 12 requested SD steps. No GPU experimental backend; Gemini/Gemma and SD 1.5 unchanged. This does NOT accelerate the CPU sampler; previous 98-minute renders can remain slow. Same ai.nova.director.stable package and certificate; do not uninstall or clear data. ZIP alternative is also published for Android download stalls." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
