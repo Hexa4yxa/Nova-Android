@@ -21,6 +21,7 @@ function render(api) {
  const archiveTools=root.Capacitor?.Plugins?.NovaTools;
  const motion=root.Capacitor?.Plugins?.NovaMotion;
  const comic=root.Capacitor?.Plugins?.NovaComicSheet;
+ const voice=root.Capacitor?.Plugins?.NovaVoice;
  const archiveBar=node(shell,'div','brain-row');
  const exportBtn=node(archiveBar,'button','council-button','💾 Сохранить копию историй');
  const importBtn=node(archiveBar,'button','council-button','♻️ Восстановить истории из копии');
@@ -259,7 +260,7 @@ function render(api) {
   };
   readComic.onclick=async()=>{
    if(!canEdit()||!comicReady||!motion?.render)return;
-   if(!confirm('NOVA откроет панели одного комикс-листа по очереди, добавит движение камеры и визуальные эффекты дождя/огня/тумана. Первая версия MP4 БЕЗ озвучки. Создать?'))return;
+   if(!confirm('NOVA откроет панели комикса по очереди, добавит движение камеры, дождь, огонь и туман. Если на телефоне есть офлайн-голос, добавит озвучку и звуки в MP4. Создать?'))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    readComic.disabled=true;makeComic.disabled=true;
    comicStop.style.display='';
@@ -285,14 +286,49 @@ function render(api) {
     });
     const outcome=await motion.render({shots});
     if(!outcome?.saved||!outcome.videoUri)throw Error('Android не подтвердил MP4.');
+    let finalMovie=outcome.videoUri;
+    let voiced=false;
+    let soundNote='Без озвучки: офлайн-голос Android не найден.';
+    // Keep the original silent MP4 as fallback. A failed TTS or AAC step
+    // must never erase the already-rendered comic or its source frames.
+    if(voice?.dubMovie&&voice?.status){
+     try{
+      comicProgress.textContent='🎙 Проверяю локальные голоса Android...';
+      const speech=await voice.status();
+      if(speech?.available){
+       comicProgress.textContent='🎙 NOVA озвучивает историю и собирает звуковой MP4...';
+       const lines=story.scenes.map((scene,index)=>{
+        const text=String(scene.voiceText||scene.beat||'').trim().slice(0,120);
+        const quotation=text.match(/[«"]([^»"]{2,110})[»"]/u);
+        return {
+         text:quotation?quotation[1]:text||('Сцена '+(index+1)),
+         speaker:scene.voiceRole==='character'||quotation?'character':'narrator',
+         startSeconds:index*4,durationSeconds:4,
+         effect:shots[index].effect
+        };
+       });
+       const dubbed=await voice.dubMovie({videoUri:outcome.videoUri,lines});
+       if(dubbed?.saved&&dubbed.videoUri){
+        finalMovie=dubbed.videoUri;
+        voiced=true;
+        soundNote='С озвучкой и звуками · '+(dubbed.distinctCharacterVoice?
+         'найдены разные голоса':'доступен один локальный голос');
+       } else soundNote='Звук не подтверждён, сохранено немое видео.';
+      }else soundNote=speech?.detail||soundNote;
+     }catch(e){
+      soundNote='Озвучка не удалась: '+(e?.message||String(e))+
+       '. Немой MP4 сохранён.';
+     }
+    }else soundNote='Озвучка пока не подключена; немой MP4 сохранён.';
     const items=director.read(),current=items.find(x=>x.id===story.id);
     if(current){
-     current.movieUri=outcome.videoUri;
+     current.movieUri=finalMovie;
      current.movieSeconds=outcome.seconds;
+     current.movieHasAudio=voiced;
      if(!director.write(items))
       throw Error('MP4 сохранён, но ссылка не записалась в проект.');
     }
-    state.notice='✅ Готов MP4 с панелями единого комикса и визуальными эффектами. Пока без звука.';
+    state.notice='✅ Видеокомикс создан. '+soundNote;
    }catch(e){state.error='Чтение комикса: '+(e?.message||String(e))+
     '. Исходные PNG и комикс-лист сохранены.';}
    finally{
@@ -517,6 +553,35 @@ function render(api) {
    const row=node(scenesPanel,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);
    node(row,'p','small',scene.beat);
+   const voiceDetails=node(row,'details','nova-more');
+   node(voiceDetails,'summary','','🎙 Озвучка и диалог');
+   node(voiceDetails,'p','small','По умолчанию NOVA произнесёт описание сцены. Можно заменить его репликой героя.');
+   const voiceText=node(voiceDetails,'textarea','council-input');
+   voiceText.maxLength=120;
+   voiceText.value=scene.voiceText||scene.beat;
+   voiceText.setAttribute('aria-label','Текст озвучки сцены '+scene.number);
+   const voiceRole=node(voiceDetails,'select','council-input');
+   const narratorOption=node(voiceRole,'option','','Рассказчик');
+   narratorOption.value='narrator';
+   const characterOption=node(voiceRole,'option','','Персонаж');
+   characterOption.value='character';
+   voiceRole.value=scene.voiceRole==='character'?'character':'narrator';
+   const saveVoice=node(voiceDetails,'button','council-button','💾 Сохранить реплику');
+   saveVoice.disabled=!canEdit();
+   saveVoice.onclick=()=>{
+    if(!canEdit())return;
+    const text=voiceText.value.trim().slice(0,120);
+    if(!text){state.error='Нужен текст для реплики.';render(api);return;}
+    const saved=director.read();
+    const current=saved.find(p=>p.id===story.id);
+    const shot=current?.scenes.find(s=>s.number===scene.number);
+    if(!shot){state.error='Сцена не найдена.';render(api);return;}
+    shot.voiceText=text;
+    shot.voiceRole=voiceRole.value==='character'?'character':'narrator';
+    if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
+    else{state.error='';state.notice='✅ Реплика сцены '+scene.number+' сохранена.';}
+    render(api);
+   };
    const details=node(row,'details','nova-more');
    node(details,'summary','','📝 Промпт NOVA для SD 1.5');
    node(details,'p','small',scene.prompt);
