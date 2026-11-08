@@ -294,6 +294,8 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         val attrs = intArrayOf(
             EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+            // EGL_RECORDABLE_ANDROID: required for MediaCodec's encoder surface.
+            0x3142, 1,
             EGL14.EGL_NONE
         )
         val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
