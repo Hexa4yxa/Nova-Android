@@ -11,7 +11,7 @@ function node(parent,tag,cls,copy) {
  return n;
 }
 function render(api) {
- const {content,brain,generate,isBusy}=api;
+ const {content,brain,generate,resumeStory,isBusy}=api;
  const director=root.NovaStoryDirector;
  content.replaceChildren();
  const shell=node(content,'section','panel');
@@ -91,6 +91,52 @@ function render(api) {
   node(storyBox,'div','council-heading',story.title);
   node(storyBox,'p','small','Идея: '+story.idea);
   node(storyBox,'p','brain-caption','Герой: '+story.hero+' · Стиль: '+story.style);
+  const remaining=story.scenes.filter(scene=>!scene.imageUri);
+  if(remaining.length){
+   const resumePanel=node(storyBox,'div','brain-row');
+   node(resumePanel,'p','small','Готово: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
+    '. Незавершённые кадры не будут повторять уже сохранённые.');
+   const resumeButton=node(resumePanel,'button','council-button',
+    '▶ Продолжить с кадра '+remaining[0].number);
+   const stopButton=node(resumePanel,'button','council-button','■ Остановить продолжение');
+   const progress=node(resumePanel,'p','small','');
+   resumeButton.disabled=state.creating||state.drawing||isBusy()||typeof resumeStory!=='function';
+   stopButton.disabled=true;
+   resumeButton.onclick=async()=>{
+    if(state.drawing||state.creating||isBusy()||typeof resumeStory!=='function')return;
+    if(!confirm('Продолжить историю с кадра '+remaining[0].number+
+     '? Генерация на CPU может занять много времени. Готовые кадры сохранятся.'))return;
+    state.drawing=true;
+    state.error='';
+    resumeButton.disabled=true;
+    stopButton.disabled=false;
+    let cancelled=false;
+    stopButton.onclick=()=>{
+     cancelled=true;
+     stopButton.disabled=true;
+     progress.textContent='■ Останавливаю создание изображения...';
+     Promise.resolve(root.Capacitor?.Plugins?.NovaImage?.cancel?.()).catch(e=>
+      console.warn('NOVA: не удалось остановить генератор',e));
+    };
+    try{
+     const result=await resumeStory(story.id,message=>{progress.textContent=message;},
+      ({scene,result})=>{
+       const key=story.id+'/'+scene.number;
+       if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,'))
+        previews[key]=result.preview;
+      },()=>cancelled);
+     state.notice=result.cancelled?
+      '■ Генерация остановлена. Готовые кадры остаются в Галерее.':
+      '✅ Все '+result.completed+' кадра истории сохранены.';
+    }catch(e){
+     state.error='Не удалось продолжить: '+(e?.message||String(e))+
+      '. Сохранённые кадры не удалены.';
+    }finally{
+     state.drawing=false;
+     render(api);
+    }
+   };
+  }
   for(const scene of story.scenes) {
    const row=node(storyBox,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);

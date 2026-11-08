@@ -230,7 +230,7 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
    subscription=await bridge.addListener('novaImageProgress',e=>{
      const total=e.total||steps;
      const minutes=Math.floor((Date.now()-startedAt)/60000);
-     onProgress('🎨 NOVA рисует: '+(e.step||0)+' / '+total+' шагов · '+minutes+' мин. CPU, офлайн.');
+     onProgress('🎨 Прогресс движка: '+(e.step||0)+' / '+total+' · настройка '+steps+' шагов SD · '+minutes+' мин. CPU, офлайн.');
    });
    onProgress('🎨 Создаю изображение · '+size+'×'+size+' · '+steps+' шагов. Первый запуск может быть долгим.');
    const result=await bridge.generate({
@@ -523,6 +523,10 @@ document.querySelectorAll('nav span').forEach(tab=>{
    content,
    brain:window.Capacitor?.Plugins?.NovaBrain,
    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12),
+   resumeStory:(storyId,onStatus,onFrame,isCancelled)=>window.NovaStoryChat.resumeExisting({
+    storyId,onStatus,onFrame,isCancelled,
+    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12)
+   }),
    isBusy:()=>busy||imageBusy
   });
   if(selected==='council')return showCouncil();

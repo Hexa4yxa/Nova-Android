@@ -1,0 +1,28 @@
+name: NOVA Resume Saved Story Tests
+
+on:
+  push:
+    branches: [fix/nova-resume-saved-story-20261108]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resume-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install offline NOVA UI dependencies
+        run: npm ci
+      - name: Validate all NOVA UI, project and story contracts
+        run: node --test tests/*.test.cjs
+      - name: Check javascript syntax for WebView modules
+        run: |
+          node --check src/nova_story_chat.js
+          node --check src/nova_story_ui.js
+          node --check src/nova_story_director.js

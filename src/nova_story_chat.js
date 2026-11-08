@@ -46,21 +46,40 @@
   if(!director.write(existing.concat([story])))
    throw Error('План не удалось сохранить в Проектах. Рисование не запущено.');
   onPlanned(story);
-  let completed=0;
+  return await renderRemaining({director,story,generate,onStatus,onFrame,isCancelled});
+ }
+ // The Android WebView can be recreated after a long CPU render. Recover by
+ // reading the durable Projects checkpoint, not by regenerating the story.
+ async function renderRemaining({director,story,generate,onStatus,onFrame,isCancelled}){
+  let completed=story.scenes.filter(scene=>!!scene.imageUri).length;
   for(const scene of story.scenes){
+   // Ignore already exported PNGs. Never spend another hour on finished frames.
+   if(scene.imageUri)continue;
    if(isCancelled())return {cancelled:true,completed,total:story.scenes.length,story};
    onStatus('🎨 Рисую кадр '+scene.number+' из '+story.scenes.length+'...');
-   // Scene prompt is already validated in the Story Director as English,
-   // has main subject first and shared protagonist/style anchors.
    const result=await generate(scene.prompt,progress=>{
     onStatus('Кадр '+scene.number+' из '+story.scenes.length+': '+progress);
    });
    if(!result?.saved)throw Error('Генератор не подтвердил сохранение кадра '+scene.number+'.');
    saveScene(director,story.id,scene.number,result);
+   // Keep this in-memory scene current too, for follow-up iteration guards.
+   scene.imageUri=result.imageUri||'saved';
+   scene.renderSeconds=Number(result.elapsedSeconds)||0;
    completed++;
    onFrame({scene,result,completed,total:story.scenes.length,story});
   }
   return {cancelled:false,completed,total:story.scenes.length,story};
  }
- root.NovaStoryChat=Object.freeze({wantsStoryImages,run});
+ async function resumeExisting(options){
+  const {storyId,generate,onStatus=()=>{},onFrame=()=>{},
+   isCancelled=()=>false}=options||{};
+  const director=root.NovaStoryDirector;
+  if(!director||typeof generate!=='function')throw Error('Нет режиссёра или генератора NOVA.');
+  const story=director.read().find(item=>item.id===storyId);
+  if(!story)throw Error('Не удалось найти сохранённую историю. Старые проекты не изменены.');
+  if(isCancelled())return {cancelled:true,completed:story.scenes.filter(s=>!!s.imageUri).length,total:story.scenes.length,story};
+  onStatus('📂 Продолжаю историю «'+story.title+'» с первого несозданного кадра...');
+  return await renderRemaining({director,story,generate,onStatus,onFrame,isCancelled});
+ }
+ root.NovaStoryChat=Object.freeze({wantsStoryImages,run,resumeExisting});
 })(typeof window!=='undefined'?window:globalThis);
