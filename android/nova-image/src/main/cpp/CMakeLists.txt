@@ -33,6 +33,18 @@ set(SD_VULKAN OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 
+# Verified on NOVA CPU Speed Lab (Redmi/arm64): retain same SD1.5 sampler and model.
+# This build target uses ARMv8.2 FP16 + DOTPROD; do not enable for older CPUs.
+# Safe CPU-only build: GPU remains disabled, no model/file migrations.
+option(NOVA_CPU_ARM_FP16_DOTPROD "Experimental arm64 CPU FP16 and dotprod tuned kernels" OFF)
+if(NOVA_CPU_ARM_FP16_DOTPROD)
+    if(NOT ANDROID OR NOT ANDROID_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "CPU FP16/DOTPROD experiment requires Android arm64-v8a")
+    endif()
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "Experimental CPU target" FORCE)
+    message(STATUS "NOVA CPU SIMD experiment: GGML_CPU_ARM_ARCH=${GGML_CPU_ARM_ARCH}")
+endif()
+
 add_subdirectory("${SD_SRC}" "${CMAKE_CURRENT_BINARY_DIR}/sd" EXCLUDE_FROM_ALL)
 
 # Two independent libraries: the signed NOVA keeps its original CPU renderer.
