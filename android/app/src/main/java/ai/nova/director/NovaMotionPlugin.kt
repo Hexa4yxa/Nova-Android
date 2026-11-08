@@ -42,6 +42,9 @@ import kotlin.math.roundToInt
  * using Android MediaCodec + OpenGL ES + MediaMuxer. No network/FFmpeg/server.
  * Narration, sound effects and subtitles are NOT part of this first milestone.
  */
+/** A shot references a saved Gallery image. It never modifies the PNG. */
+private data class ComicShot(val uri: Uri, val seconds: Int, val plan: String, val motion: String)
+
 @CapacitorPlugin(name = "NovaMotion")
 class NovaMotionPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -54,26 +57,37 @@ class NovaMotionPlugin : Plugin() {
             call.reject("Для экспорта в Галерею требуется Android 10 или новее.")
             return
         }
-        val data: JSONArray = call.getArray("frames") ?: run {
-            call.reject("Нужны готовые кадры проекта.")
-            return
-        }
-        if (data.length() !in 1..6) {
-            call.reject("Нужно от 1 до 6 готовых кадров.")
-            return
-        }
-        val seconds = (call.getInt("secondsPerFrame") ?: 4).coerceIn(3, 7)
-        val frames = try {
-            (0 until data.length()).map { index ->
-                val uri = Uri.parse(data.getString(index))
-                require(uri.scheme == "content" && uri.authority == "media" &&
-                    (uri.path?.contains("/images/media/") == true)) {
-                    "Кадр ${index + 1} не является сохранённым изображением Галереи."
+        // Backward compatible: previous APKs use frames[] + secondsPerFrame.
+        // New Storyboard Director uses validated shots[] (up to 16 edits).
+        val shots = try {
+            val editList = call.getArray("shots")
+            if (editList != null) {
+                require(editList.length() in 1..16) { "Нужно от 1 до 16 режиссёрских планов." }
+                (0 until editList.length()).map { index ->
+                    val item = editList.getJSONObject(index)
+                    val uri = checkedImageUri(item.getString("imageUri"), index)
+                    val seconds = item.optInt("durationSeconds", 3)
+                    require(seconds in 2..5) { "План ${index + 1}: длительность от 2 до 5 секунд." }
+                    val plan = item.optString("plan", "medium")
+                    val motion = item.optString("motion", "hold")
+                    require(plan in setOf("wide", "medium", "close")) { "Неподдерживаемый размер плана." }
+                    require(motion in setOf("hold", "push", "pull", "pan-left", "pan-right", "tilt-up", "tilt-down")) {
+                        "Неподдерживаемое движение камеры."
+                    }
+                    ComicShot(uri, seconds, plan, motion)
                 }
-                uri
+            } else {
+                val frames: JSONArray = call.getArray("frames")
+                    ?: error("Нужны готовые кадры проекта.")
+                require(frames.length() in 1..6) { "Нужно от 1 до 6 готовых кадров." }
+                val seconds = (call.getInt("secondsPerFrame") ?: 4).coerceIn(3, 7)
+                (0 until frames.length()).map { index ->
+                    ComicShot(checkedImageUri(frames.getString(index), index), seconds, "wide",
+                        if (index % 2 == 0) "pan-right" else "pan-left")
+                }
             }
         } catch (error: Exception) {
-            call.reject(error.message ?: "Неверные ссылки на кадры.")
+            call.reject(error.message ?: "Некорректная раскадровка.")
             return
         }
         if (!working.compareAndSet(false, true)) {
@@ -93,15 +107,16 @@ class NovaMotionPlugin : Plugin() {
                         put(MediaStore.Video.Media.IS_PENDING, 1)
                     }
                 ) ?: error("Android не создал файл будущего видео.")
-                encode(savedUri, frames, seconds)
+                encode(savedUri, shots)
                 context.contentResolver.update(savedUri, ContentValues().apply {
                     put(MediaStore.Video.Media.IS_PENDING, 0)
                 }, null, null)
                 call.resolve(JSObject().apply {
                     put("saved", true)
                     put("videoUri", savedUri.toString())
-                    put("frames", frames.size)
-                    put("seconds", frames.size * seconds)
+                    put("frames", shots.map { it.uri }.distinct().size)
+                    put("shots", shots.size)
+                    put("seconds", shots.sumOf { it.seconds })
                     put("silent", true)
                 })
             } catch (error: Exception) {
@@ -145,6 +160,15 @@ class NovaMotionPlugin : Plugin() {
         call.resolve(JSObject().apply { put("requested", working.get()) })
     }
 
+    private fun checkedImageUri(raw: String, index: Int): Uri {
+        val uri = Uri.parse(raw)
+        require(uri.scheme == "content" && uri.authority == "media" &&
+            uri.path?.contains("/images/media/") == true) {
+            "Кадр ${index + 1} не является изображением из Галереи."
+        }
+        return uri
+    }
+
     private fun checkActive() {
         if (stopRequested.get()) error("Монтаж остановлен. Незавершённый MP4 удалён; PNG сохранены.")
     }
@@ -162,11 +186,10 @@ class NovaMotionPlugin : Plugin() {
             ?: error("Кадр удалён из Галереи или доступ к нему закрыт. Исходные проекты сохранены.")
     }
 
-    private fun encode(output: Uri, frames: List<Uri>, seconds: Int) {
+    private fun encode(output: Uri, shots: List<ComicShot>) {
         val width = 576
         val height = 1024
         val fps = 24
-        val frameCount = seconds * fps
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, 2_400_000)
@@ -228,17 +251,19 @@ class NovaMotionPlugin : Plugin() {
                 }
                 egl = PanelRenderer(inputSurface, width, height)
                 val renderer = egl ?: error("Не удалось открыть видеоповерхность.")
-                for ((scene, uri) in frames.withIndex()) {
+                var frameIndex = 0L
+                for ((scene, shot) in shots.withIndex()) {
                     checkActive()
-                    val bitmap = frameBitmap(uri)
+                    val bitmap = frameBitmap(shot.uri)
                     try {
                         renderer.setImage(bitmap)
+                        val frameCount = shot.seconds * fps
                         for (frame in 0 until frameCount) {
                             checkActive()
                             val progress = frame.toFloat() / frameCount.toFloat()
-                            renderer.draw(progress, scene)
-                            val index = scene.toLong() * frameCount + frame
-                            renderer.present(index * 1_000_000_000L / fps)
+                            renderer.draw(progress, scene, shot.plan, shot.motion)
+                            renderer.present(frameIndex * 1_000_000_000L / fps)
+                            frameIndex++
                             drain(false)
                         }
                     } finally {
@@ -247,7 +272,7 @@ class NovaMotionPlugin : Plugin() {
                     }
                     notifyListeners("novaMotionProgress", JSObject().apply {
                         put("done", scene + 1)
-                        put("total", frames.size)
+                        put("total", shots.size)
                     })
                 }
                 codec.signalEndOfInputStream()
@@ -383,7 +408,7 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "Не удалось загрузить кадр в GPU." }
     }
 
-    fun draw(progress: Float, scene: Int) {
+    fun draw(progress: Float, scene: Int, plan: String, motion: String) {
         val t = progress.coerceIn(0f, 1f)
         GLES20.glViewport(0,0,width,height)
         GLES20.glClearColor(0f,0f,0f,1f)
@@ -397,8 +422,29 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,texture)
-        GLES20.glUniform1f(zoomLocation,1.02f+0.07f*t)
-        GLES20.glUniform2f(offsetLocation,(if(scene%2==0) 1f else -1f)*0.014f*(t-0.5f),0.007f*(0.5f-t))
+        val startZoom = when (plan) {
+            "close" -> 1.65f
+            "medium" -> 1.30f
+            else -> 1.06f
+        }
+        val zoomMotion = when (motion) {
+            "pull" -> -0.14f
+            "push" -> 0.14f
+            else -> 0.03f
+        }
+        GLES20.glUniform1f(zoomLocation, startZoom + zoomMotion*t)
+        val distance = 0.06f*(t-0.5f)
+        val x = when (motion) {
+            "pan-left" -> -distance
+            "pan-right" -> distance
+            else -> if (motion=="hold") 0f else (if(scene%2==0) 0.008f else -0.008f)*(t-0.5f)
+        }
+        val y = when (motion) {
+            "tilt-up" -> -distance
+            "tilt-down" -> distance
+            else -> 0f
+        }
+        GLES20.glUniform2f(offsetLocation,x,y)
         val appearance = (t/0.17f).coerceIn(0f,1f)
         val departure = ((1f-t)/0.16f).coerceIn(0f,1f)
         val fade = (min(appearance,departure)).let { it*it*(3-2*it) }
