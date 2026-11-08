@@ -53,8 +53,9 @@ android {
             def imageHardening = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-image-hardening'
             def brainsAuto = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-brains-auto'
             def nativeImage = System.getenv('GITHUB_REF') == 'refs/heads/feature/nova-native-image-engine'
-            applicationIdSuffix nativeImage ? ".nativeimage" : (brainsAuto ? ".brainslab" : (imageHardening ? ".imageqa" : (imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test")))))))
-            versionNameSuffix nativeImage ? "-nativeimage" : (brainsAuto ? "-brainslab" : (imageHardening ? "-imageqa" : (imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test")))))))
+            def speedLab = System.getenv('GITHUB_REF') == 'refs/heads/experiment/nova-arm-cpu-simd-speed-20261108'
+            applicationIdSuffix speedLab ? ".speedlab" : (nativeImage ? ".nativeimage" : (brainsAuto ? ".brainslab" : (imageHardening ? ".imageqa" : (imageTest ? ".imagepilot" : (toolsTest ? ".toolstest" : (councilTest ? ".counciltest" : (gemmaTest ? ".gemmafix" : (isolatedBuild ? ".testfix" : ".test"))))))))
+            versionNameSuffix speedLab ? "-speedlab" : (nativeImage ? "-nativeimage" : (brainsAuto ? "-brainslab" : (imageHardening ? "-imageqa" : (imageTest ? "-imagepilot" : (toolsTest ? "-toolstest" : (councilTest ? "-counciltest" : (gemmaTest ? "-gemmafix" : (isolatedBuild ? "-testfix" : "-test"))))))))
         }
         release {
             // First stable install is a separate package because past debug APKs
