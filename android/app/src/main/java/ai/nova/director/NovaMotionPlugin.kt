@@ -179,13 +179,16 @@ class NovaMotionPlugin : Plugin() {
         var surface: Surface? = null
         var egl: PanelRenderer? = null
         var muxer: MediaMuxer? = null
+        var descriptor: android.os.ParcelFileDescriptor? = null
         try {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             surface = codec.createInputSurface()
             codec.start()
             codecStarted = true
-            context.contentResolver.openFileDescriptor(output, "w")?.use { descriptor ->
-                muxer = MediaMuxer(descriptor.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            descriptor = context.contentResolver.openFileDescriptor(output, "w")
+                ?: error("Android не выдал доступ к файлу MP4.")
+            run {
+                muxer = MediaMuxer(descriptor!!.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                 val writer = muxer ?: error("Android не открыл MP4-контейнер.")
                 val info = MediaCodec.BufferInfo()
                 var finished = false
@@ -249,7 +252,7 @@ class NovaMotionPlugin : Plugin() {
                 codec.signalEndOfInputStream()
                 drain(true)
                 check(finished && muxerStarted) { "Видеокодек не завершил запись." }
-            } ?: error("Android не выдал доступ к файлу MP4.")
+            }
         } finally {
             try { egl?.close() } catch (_: Exception) {}
             try { surface?.release() } catch (_: Exception) {}
@@ -257,6 +260,7 @@ class NovaMotionPlugin : Plugin() {
             try { codec.release() } catch (_: Exception) {}
             if (muxerStarted) try { muxer?.stop() } catch (_: Exception) {}
             try { muxer?.release() } catch (_: Exception) {}
+            try { descriptor?.close() } catch (_: Exception) {}
         }
     }
 
