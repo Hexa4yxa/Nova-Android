@@ -1,0 +1,64 @@
+name: NOVA Official ARM CPU Optimization • verification
+on:
+  push:
+    branches: [feature/nova-official-arm-cpu-performance-20261108]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tuned-cpu:
+    runs-on: ubuntu-latest
+    env:
+      NOVA_CPU_ARM_TUNED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout locked local GGUF engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+      - name: Checkout locked Stable Diffusion engine
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned Android native toolchain
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+      - name: Run all NOVA offline contract tests
+        run: |
+          npm ci
+          node --test tests/*.test.cjs
+      - name: Compile optimized ARM native image engine and Kotlin tests
+        run: |
+          npx cap sync android
+          cd android
+          bash gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Confirm ARM CPU APK has original Nova package dependencies, no GPU
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image.so'
+          if unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnova-image-gpu.so'; then
+            echo "::error::Experimental Adreno renderer should not be packaged."
+            exit 1
+          fi
+          grep -R 'armv8.2-a+fp16+dotprod' android/nova-image/.cxx/ > /dev/null
+          echo "Optimized ARM CPU library compiled. Real-device speedup not guaranteed."
