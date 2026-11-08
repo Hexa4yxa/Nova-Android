@@ -136,3 +136,73 @@ test('official APK wires real image backend and keeps project/gallery logic',()=
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
  assert.match(ui,/brain\.chat\(\{message:question,maxTokens:512\}\)/);
 });
+
+test('resume from saved checkpoint renders only missing frames, not the costly first frame',async()=>{
+ const {bridge,director}=setup();
+ let initialCalls=0;
+ await assert.rejects(()=>bridge.run({
+  text:'Придумай историю и сделай картинки',
+  brain:fakeBrain(),
+  generate:async()=>{
+   initialCalls++;
+   if(initialCalls===2)throw Error('Android WebView detached');
+   return {saved:true,imageUri:'content://media/first',elapsedSeconds:5880};
+  }
+ }),/WebView detached/);
+ const saved=director.read();
+ assert.equal(saved.length,1);
+ assert.equal(saved[0].scenes[0].imageUri,'content://media/first');
+ assert.equal(saved[0].scenes[1].imageUri,'');
+ assert.equal(saved[0].scenes[2].imageUri,'');
+ const processed=[];
+ const result=await bridge.resumeExisting({
+  storyId:saved[0].id,
+  generate:async(prompt)=>{
+   processed.push(prompt);
+   return {saved:true,imageUri:'content://media/resumed-'+processed.length,elapsedSeconds:20};
+  }
+ });
+ assert.equal(result.completed,3);
+ assert.equal(processed.length,2);
+ assert.equal(director.read().length,1);
+ assert.equal(director.read()[0].scenes[0].imageUri,'content://media/first');
+ assert.equal(director.read()[0].scenes[1].imageUri,'content://media/resumed-1');
+ assert.equal(director.read()[0].scenes[2].imageUri,'content://media/resumed-2');
+ await bridge.resumeExisting({storyId:saved[0].id,generate:async()=>{throw Error('Duplicate costly frame!');}});
+ assert.equal(director.read().length,1);
+});
+test('resume cancelled between scenes keeps the completed checkpoint',async()=>{
+ const {bridge,director}=setup();
+ const story=director.parse(storyboard,'Космическая история');
+ story.id='test-resume';
+ story.scenes[0].imageUri='content://media/already';
+ assert.ok(director.write([story]));
+ let cancelled=false;
+ let calls=0;
+ const res=await bridge.resumeExisting({
+  storyId:story.id,isCancelled:()=>cancelled,
+  generate:async()=>{
+   calls++;
+   return {saved:true,imageUri:'content://media/new',elapsedSeconds:13};
+  },
+  onFrame:()=>{cancelled=true;}
+ });
+ assert.equal(res.cancelled,true);
+ assert.equal(calls,1);
+ assert.equal(director.read()[0].scenes[0].imageUri,'content://media/already');
+ assert.equal(director.read()[0].scenes[1].imageUri,'content://media/new');
+ assert.equal(director.read()[0].scenes[2].imageUri,'');
+ await assert.rejects(()=>bridge.resumeExisting({storyId:'not-existing',generate:async()=>{}}),/Не удалось найти/);
+ assert.equal(director.read().length,1);
+});
+test('Projects UI offers a visible one-tap resume with stop and native CPU render',()=>{
+ const html=fs.readFileSync('src/index.html','utf8');
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/Продолжить с кадра /);
+ assert.match(ui,/resumeStory\(story\.id/);
+ assert.match(ui,/scene=>!scene\.imageUri/);
+ assert.match(ui,/NovaImage\?\.cancel\?\.\(\)/);
+ assert.match(html,/window\.NovaStoryChat\.resumeExisting/);
+ assert.match(html,/Прогресс движка/);
+ assert.doesNotThrow(()=>new vm.Script(ui));
+});
