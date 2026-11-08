@@ -84,3 +84,15 @@ test('GPU staging intentionally omits Khronos ICD loader and separate APKs',()=>
  assert.doesNotMatch(build,/cp.*libOpenCL\.so.*STAGING/);
  assert.doesNotMatch(build,/adb install|gh release|apksigner/);
 });
+
+test('Adreno 810v1 aliases remain blocked before OpenCL initialization',()=>{
+  const unsafe=/adreno[^0-9]{0,32}810(?!\d)/i;
+  for(const device of ['Adreno810v1','Adreno 810','GPU доступен: Adreno810v1 (CPU)','Adreno (TM) 810']) {
+    assert.equal(unsafe.test(device),true,device);
+  }
+  for(const device of ['Adreno 820','Adreno 8100','Adreno 830','Mali G78']) {
+    assert.equal(unsafe.test(device),false,device);
+  }
+  assert.ok(plugin.includes('Regex("""(?i)adreno[^0-9]{0,32}810(?!\\d)""").containsMatchIn(gpuDriver)'));
+  assert.ok(html.includes('/adreno[^0-9]{0,32}810(?!\\d)/i.test('));
+});

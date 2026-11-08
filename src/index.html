@@ -696,8 +696,7 @@ async function showBrainManager(){
      if(resources.gpuProbe){
       add(resourceBox,'p','brain-caption','🧪 GPU драйвер: '+resources.gpuProbe);
      }
-     const unsafeAdreno810=String(resources.gpuProbe||'').toLowerCase().includes('adreno') &&
-       /(?:^|\D)810(?:\D|$)/.test(String(resources.gpuProbe||''));
+     const unsafeAdreno810=/adreno[^0-9]{0,32}810(?!\d)/i.test(String(resources.gpuProbe||''));
      if(unsafeAdreno810){
       add(resourceBox,'p','brain-caption','⛔ Тест Adreno 810 отключён после белого кадра и зависания системного интерфейса. Обычный CPU-генератор работает отдельно.');
       add(imageToolsBox,'p','brain-caption','GPU-тест недоступен до проверки драйвера. Модель SD 1.5, Gemma и истории не затронуты.');
