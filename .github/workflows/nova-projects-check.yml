@@ -1,0 +1,31 @@
+name: NOVA Projects manager • safe UI tests
+
+on:
+  push:
+    branches:
+      - feature/nova-projects-organizer-20261108
+  pull_request:
+    branches:
+      - release/nova-one-stable
+    paths:
+      - 'src/nova_story_ui.js'
+      - 'src/nova_story_director.js'
+      - 'src/nova_story_chat.js'
+      - 'tests/nova-project-manager.test.cjs'
+      - 'tests/nova-story-director.test.cjs'
+      - 'tests/nova-story-chat.test.cjs'
+      - '.github/workflows/nova-projects-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check saved-project management and story compatibility
+        run: node --test tests/nova-project-manager.test.cjs tests/nova-story-director.test.cjs tests/nova-story-chat.test.cjs

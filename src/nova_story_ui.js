@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:''};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:'',projectQuery:''};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -86,14 +86,113 @@ function render(api) {
   node(content,'section','panel','📚 Пока нет историй. Начни с идеи выше.');
   return;
  }
+ const manager=node(content,'section','panel');
+ node(manager,'div','council-heading','📁 Проекты ('+saved.length+')');
+ node(manager,'p','small','Поиск, переименование и удаление записей. Картинки в Галерее не затрагиваются.');
+ const search=node(manager,'input','council-input');
+ search.type='search';
+ search.placeholder='🔎 Найти проект по названию или идее';
+ search.setAttribute('aria-label','Поиск проектов NOVA');
+ search.value=state.projectQuery;
+ const bulk=node(manager,'div','brain-row');
+ const selectedCount=node(bulk,'span','small','Выбрано: 0');
+ const removeSelected=node(bulk,'button','council-button','🗑 Удалить выбранные');
+ const selectedIds=new Set();
+ const cards=[];
+ const canEdit=()=>!state.creating&&!state.drawing&&!state.backupBusy&&!isBusy();
+ function showSelection() {
+  selectedCount.textContent='Выбрано: '+selectedIds.size;
+  removeSelected.disabled=!canEdit()||selectedIds.size===0;
+ }
+ function filterCards(){
+  const needle=state.projectQuery.trim().toLocaleLowerCase();
+  for(const item of cards){
+   const text=[item.story.title,item.story.idea,item.story.hero].join(' ').toLocaleLowerCase();
+   item.box.style.display=needle&&!text.includes(needle)?'none':'';
+  }
+ }
+ function erase(ids){
+  if(!canEdit()||!ids.size)return;
+  const all=director.read();
+  const removing=all.filter(item=>ids.has(item.id));
+  if(!removing.length){state.error='Проекты уже отсутствуют. Обнови список.';render(api);return;}
+  if(!confirm('Удалить '+removing.length+' проект(ов) из NOVA? Это удалит планы и промпты из списка. PNG в Галерее останутся. Восстановить планы можно из ранее сохранённой копии.'))return;
+  if(!director.write(all.filter(item=>!ids.has(item.id)))){
+   state.error='Не удалось сохранить удаление. Старые записи не изменены.';
+   render(api);return;
+  }
+  for(const id of ids){
+   for(const key of Object.keys(previews))if(key.startsWith(id+'/'))delete previews[key];
+  }
+  state.error='';
+  state.notice='✅ Удалено проектов: '+removing.length+'. PNG в Галерее сохранены.';
+  render(api);
+ }
+ search.oninput=()=>{state.projectQuery=search.value;filterCards();};
+ removeSelected.onclick=()=>erase(selectedIds);
+ showSelection();
  for(const story of saved) {
   const storyBox=node(content,'section','panel');
-  node(storyBox,'div','council-heading',story.title);
-  node(storyBox,'p','small','Идея: '+story.idea);
-  node(storyBox,'p','brain-caption','Герой: '+story.hero+' · Стиль: '+story.style);
+  cards.push({story,box:storyBox});
+  const heading=node(storyBox,'div','brain-row');
+  const pick=node(heading,'input','');
+  pick.type='checkbox';
+  pick.style.cssText='flex:none;width:22px;height:22px;accent-color:#9394ff';
+  pick.setAttribute('aria-label','Выбрать проект '+story.title);
+  pick.disabled=!canEdit();
+  pick.onchange=()=>{
+   if(pick.checked)selectedIds.add(story.id);
+   else selectedIds.delete(story.id);
+   showSelection();
+  };
+  node(heading,'div','council-heading',story.title);
   const remaining=story.scenes.filter(scene=>!scene.imageUri);
+  node(storyBox,'p','small','Кадры: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
+   ' · Идея: '+(story.idea||'').slice(0,115)+((story.idea||'').length>115?'…':''));
+  const commands=node(storyBox,'div','brain-row');
+  const show=node(commands,'button','council-button','▾ Сцены ('+story.scenes.length+')');
+  const rename=node(commands,'button','council-button','✎ Название');
+  const eraseOne=node(commands,'button','council-button','🗑 Удалить');
+  rename.disabled=!canEdit();
+  eraseOne.disabled=!canEdit();
+  eraseOne.onclick=()=>erase(new Set([story.id]));
+  const editRow=node(storyBox,'div','brain-row');
+  editRow.style.display='none';
+  const nameInput=node(editRow,'input','council-input');
+  nameInput.type='text';nameInput.maxLength=100;nameInput.value=story.title;
+  nameInput.setAttribute('aria-label','Новое название проекта');
+  const saveName=node(editRow,'button','council-button','Сохранить');
+  const cancelName=node(editRow,'button','council-button','Отмена');
+  rename.onclick=()=>{
+   if(!canEdit())return;
+   editRow.style.display=editRow.style.display==='none'?'':'none';
+   if(editRow.style.display!=='none')nameInput.focus();
+  };
+  cancelName.onclick=()=>{editRow.style.display='none';};
+  saveName.onclick=()=>{
+   if(!canEdit())return;
+   const title=nameInput.value.trim();
+   if(!title){state.error='Название проекта не может быть пустым.';render(api);return;}
+   const all=director.read();
+   const target=all.find(item=>item.id===story.id);
+   if(!target){state.error='Проект не найден. Обнови список.';render(api);return;}
+   target.title=title;
+   if(!director.write(all)){
+    state.error='Не получилось сохранить новое название. Проекты не изменены.';
+    render(api);return;
+   }
+   state.error='';state.notice='✅ Название проекта изменено.';
+   render(api);
+  };
+  const scenesPanel=node(storyBox,'div','');
+  scenesPanel.hidden=true;
+  show.onclick=()=>{
+   scenesPanel.hidden=!scenesPanel.hidden;
+   show.textContent=scenesPanel.hidden?'▾ Сцены ('+story.scenes.length+')':'▴ Скрыть сцены';
+  };
+  node(scenesPanel,'p','brain-caption','Герой: '+story.hero+' · Стиль: '+story.style);
   if(remaining.length){
-   const resumePanel=node(storyBox,'div','brain-row');
+   const resumePanel=node(scenesPanel,'div','brain-row');
    node(resumePanel,'p','small','Готово: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
     '. Незавершённые кадры не будут повторять уже сохранённые.');
    const resumeButton=node(resumePanel,'button','council-button',
@@ -138,7 +237,7 @@ function render(api) {
    };
   }
   for(const scene of story.scenes) {
-   const row=node(storyBox,'div','brain-row');
+   const row=node(scenesPanel,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);
    node(row,'p','small',scene.beat);
    const details=node(row,'details','nova-more');
@@ -174,6 +273,7 @@ function render(api) {
    };
   }
  }
+ filterCards();
 }
 root.NovaStoryUI=Object.freeze({render});
 })(typeof window!=='undefined'?window:globalThis);
