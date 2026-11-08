@@ -20,6 +20,7 @@ function render(api) {
 
  const archiveTools=root.Capacitor?.Plugins?.NovaTools;
  const motion=root.Capacitor?.Plugins?.NovaMotion;
+ const comic=root.Capacitor?.Plugins?.NovaComicSheet;
  const archiveBar=node(shell,'div','brain-row');
  const exportBtn=node(archiveBar,'button','council-button','💾 Сохранить копию историй');
  const importBtn=node(archiveBar,'button','council-button','♻️ Восстановить истории из копии');
@@ -175,6 +176,133 @@ function render(api) {
   const readyFrames=story.scenes
    .map(scene=>typeof scene.imageUri==='string'?scene.imageUri:'')
    .filter(uri=>/^content:\/\/media\/[^/]+\/images\/media\/\d+/i.test(uri));
+  // NOVA does the complete pipeline: missing SD1.5 images (owner-approved),
+  // ONE saved physical comic PNG, then an optional panel-by-panel movie.
+  // This remains compatible with older 1-3-scene projects and all saved PNGs.
+  const comicRow=node(storyBox,'div','brain-row');
+  const makeComic=node(comicRow,'button','council-button',
+   '📖 NOVA, создай комикс · '+story.scenes.length+' сцен');
+  const sameSources=Array.isArray(story.comicFrameUris)&&
+   story.comicFrameUris.length===story.scenes.length&&
+   story.comicFrameUris.every((uri,index)=>uri===story.scenes[index].imageUri);
+  const comicReady=!!(sameSources&&story.comicPageUri);
+  makeComic.disabled=!canEdit()||!comic?.build||
+   (remaining.length>0&&typeof resumeStory!=='function');
+  const openComic=node(comicRow,'button','council-button','🖼 Комикс-лист');
+  openComic.style.display=comicReady?'':'none';
+  openComic.disabled=!comicReady||!comic?.openPage;
+  openComic.onclick=async()=>{
+   try{await comic.openPage({pageUri:story.comicPageUri});}
+   catch(e){state.error='Не удалось открыть комикс: '+(e?.message||String(e));render(api);}
+  };
+  const readComic=node(comicRow,'button','council-button','🎬 Читать комикс в MP4');
+  readComic.style.display=comicReady?'':'none';
+  readComic.disabled=!comicReady||!canEdit()||!motion?.render;
+  const comicProgress=node(storyBox,'p','small','');
+  const comicStop=node(comicRow,'button','council-button','■ Остановить');
+  comicStop.style.display='none';
+  makeComic.onclick=async()=>{
+   if(!canEdit()||!comic?.build)return;
+   const current=director.read().find(x=>x.id===story.id);
+   if(!current)return;
+   const missing=current.scenes.filter(x=>!x.imageUri).length;
+   const warning=missing>0?
+    'NOVA сама нарисует '+missing+' недостающих кадров и соберёт один PNG-комикс. '+
+    'CPU-генерация каждого кадра может занять много времени; оставь приложение открытым. '+
+    'Готовые кадры повторно не рисуются. Продолжить?':
+    'NOVA соберёт один комикс-лист из '+current.scenes.length+
+    ' готовых PNG и сохранит в Галерею. Исходные картинки не изменятся. Продолжить?';
+   if(!confirm(warning))return;
+   state.motionBusy=true;state.motionStoryId=story.id;
+   state.error='';makeComic.disabled=true;readComic.disabled=true;
+   comicStop.style.display='';
+   let cancelled=false;
+   state.motionStop=()=>{
+    cancelled=true;
+    comicProgress.textContent='■ Останавливаю генерацию после текущего кадра...';
+    Promise.resolve(root.Capacitor?.Plugins?.NovaImage?.cancel?.()).catch(()=>{});
+   };
+   comicStop.onclick=()=>state.motionStop?.();
+   try{
+    if(missing){
+     const generation=await resumeStory(story.id,message=>{
+      comicProgress.textContent=message;
+     },()=>{},()=>cancelled);
+     if(generation?.cancelled||cancelled)throw Error('Остановлено пользователем');
+    }
+    const fresh=director.read().find(x=>x.id===story.id);
+    if(!fresh||fresh.scenes.some(x=>!/^content:\/\/media\/[^/]+\/images\/media\/\d+/i.test(x.imageUri||'')))
+     throw Error('Не все изображения проекта сохранены в Галерею.');
+    comicProgress.textContent='📖 Собираю единую страницу комикса...';
+    const result=await comic.build({
+     title:fresh.title,
+     frames:fresh.scenes.map(x=>({imageUri:x.imageUri,beat:x.beat}))
+    });
+    if(!result?.saved||!result.pageUri)throw Error('Android не подтвердил сохранение комикса.');
+    const items=director.read();
+    const target=items.find(x=>x.id===story.id);
+    if(!target)throw Error('PNG сохранён, но проект не найден.');
+    target.comicPageUri=result.pageUri;
+    target.comicFrameUris=fresh.scenes.map(x=>x.imageUri);
+    target.comicPanels=fresh.scenes.length;
+    if(!director.write(items))
+     throw Error('Комикс сохранён в Галерею, но проект не смог запомнить путь к PNG.');
+    state.notice='✅ NOVA создала один комикс-лист из '+fresh.scenes.length+
+     ' панелей. Открой его или запусти чтение в MP4.';
+   }catch(e){
+    state.error='Комикс: '+(e?.message||String(e))+
+     '. Уже созданные кадры остаются в Галерее и проекте.';
+   }finally{
+    state.motionBusy=false;state.motionStoryId='';state.motionStop=null;
+    comicStop.style.display='none';render(api);
+   }
+  };
+  readComic.onclick=async()=>{
+   if(!canEdit()||!comicReady||!motion?.render)return;
+   if(!confirm('NOVA откроет панели одного комикс-листа по очереди, добавит движение камеры и визуальные эффекты дождя/огня/тумана. Первая версия MP4 БЕЗ озвучки. Создать?'))return;
+   state.motionBusy=true;state.motionStoryId=story.id;
+   readComic.disabled=true;makeComic.disabled=true;
+   comicStop.style.display='';
+   comicProgress.textContent='🎬 Читаю комикс по панелям...';
+   state.motionStop=()=>motion.cancel?.().catch(()=>{});
+   comicStop.onclick=()=>state.motionStop?.();
+   let listener=null;
+   try{
+    if(motion.addListener)listener=await motion.addListener('novaMotionProgress',progress=>{
+     comicProgress.textContent='🎬 Панель '+Number(progress.done||0)+' из '+story.scenes.length;
+    });
+    const shots=story.scenes.map((scene,index)=>{
+     const description=(scene.beat+' '+scene.prompt).toLowerCase();
+     let effect='none';
+     if(/дожд|rain|storm/.test(description))effect='rain';
+     else if(/факел|огонь|плам|fire|flame|torch|lantern/.test(description))effect='torch';
+     else if(/туман|дым|mist|fog|smoke/.test(description))effect='fog';
+     else if(/свет|сиян|light|glow|silver/.test(description))effect='glow';
+     return {
+      imageUri:story.comicPageUri,panelIndex:index,panelCount:story.scenes.length,
+      plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:4,effect
+     };
+    });
+    const outcome=await motion.render({shots});
+    if(!outcome?.saved||!outcome.videoUri)throw Error('Android не подтвердил MP4.');
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    if(current){
+     current.movieUri=outcome.videoUri;
+     current.movieSeconds=outcome.seconds;
+     if(!director.write(items))
+      throw Error('MP4 сохранён, но ссылка не записалась в проект.');
+    }
+    state.notice='✅ Готов MP4 с панелями единого комикса и визуальными эффектами. Пока без звука.';
+   }catch(e){state.error='Чтение комикса: '+(e?.message||String(e))+
+    '. Исходные PNG и комикс-лист сохранены.';}
+   finally{
+    try{await listener?.remove();}catch(_){}
+    state.motionStop=null;state.motionBusy=false;state.motionStoryId='';
+    render(api);
+   }
+  };
+  if(comicReady)node(storyBox,'p','small','📖 Единый комикс-лист готов: '+story.comicPanels+
+   ' панелей · Pictures/NOVA.');
   const motionRow=node(storyBox,'div','brain-row');
   const movie=node(motionRow,'button','council-button',
    '🎞 Создать видеокомикс · '+readyFrames.length+' кадр(ов)');
