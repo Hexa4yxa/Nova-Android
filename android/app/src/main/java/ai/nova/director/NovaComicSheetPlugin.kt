@@ -90,7 +90,7 @@ class NovaComicSheetPlugin : Plugin() {
                     NovaComicLayout.WIDTH,NovaComicLayout.HEIGHT,Bitmap.Config.ARGB_8888)
                 try {
                     paintSheet(sheet,title,frames)
-                    saved = context.contentResolver.insert(
+                    val outputUri = context.contentResolver.insert(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                         ContentValues().apply {
                             put(MediaStore.Images.Media.DISPLAY_NAME,"NOVA-Comic-${System.currentTimeMillis()}.png")
@@ -99,17 +99,18 @@ class NovaComicSheetPlugin : Plugin() {
                             put(MediaStore.Images.Media.IS_PENDING,1)
                         }
                     ) ?: error("Не получилось создать комикс в Галерее.")
-                    context.contentResolver.openOutputStream(saved)?.use { out ->
+                    saved = outputUri
+                    context.contentResolver.openOutputStream(outputUri)?.use { out ->
                         check(sheet.compress(Bitmap.CompressFormat.PNG,100,out)) {
                             "Не удалось записать PNG комикса."
                         }
                     } ?: error("Android не открыл файл комикса.")
-                    context.contentResolver.update(saved,ContentValues().apply {
+                    context.contentResolver.update(outputUri,ContentValues().apply {
                         put(MediaStore.Images.Media.IS_PENDING,0)
                     },null,null)
                     call.resolve(JSObject().apply {
                         put("saved",true)
-                        put("pageUri",saved.toString())
+                        put("pageUri",outputUri.toString())
                         put("panels",frames.size)
                         put("width",NovaComicLayout.WIDTH)
                         put("height",NovaComicLayout.HEIGHT)
@@ -133,9 +134,9 @@ class NovaComicSheetPlugin : Plugin() {
 
     private fun readBitmap(uri: Uri): Bitmap {
         val opts=BitmapFactory.Options().apply {inJustDecodeBounds=true}
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input,null,opts)
-        } ?: error("Нет доступа к PNG сцены.")
+        val boundsStream=context.contentResolver.openInputStream(uri)
+            ?: error("Нет доступа к PNG сцены.")
+        boundsStream.use { input -> BitmapFactory.decodeStream(input,null,opts) }
         require(opts.outWidth>0 && opts.outHeight>0) {"Повреждённый кадр проекта."}
         var sample=1
         while (max(opts.outWidth,opts.outHeight)/sample>1536) sample*=2
