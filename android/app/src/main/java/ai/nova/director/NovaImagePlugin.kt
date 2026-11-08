@@ -393,8 +393,7 @@ class NovaImagePlugin : Plugin() {
         // SystemUI became unresponsive. Stop *before* loading the OpenCL
         // library, not only after image readback. CPU remains available.
         val gpuDriver = NativeImageEngine.gpuProbe()
-        if (gpuDriver.contains("Adreno", ignoreCase = true) &&
-            Regex("""\b810\b""").containsMatchIn(gpuDriver)) {
+        if (Regex("""(?i)adreno[^0-9]{0,32}810(?!\d)""").containsMatchIn(gpuDriver)) {
             call.reject("GPU-тест на Adreno 810 временно отключён после зависания Android. " +
                 "Используй безопасную генерацию CPU; модель и проекты сохранены.")
             return
