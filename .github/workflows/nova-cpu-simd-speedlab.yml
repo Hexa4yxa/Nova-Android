@@ -1,10 +1,10 @@
-name: NOVA CPU SIMD Speed Lab (no release)
+name: NOVA CPU SIMD Speed Lab (isolated test APK)
 on:
   push:
     branches: [experiment/nova-arm-cpu-simd-speed-20261108]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   compile-simd-cpu:
     runs-on: ubuntu-latest
@@ -56,3 +56,32 @@ jobs:
           if unzip -l "$APK" | grep 'lib/arm64-v8a/libnova-image-gpu.so'; then exit 1; fi
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep 'ai.nova.director.speedlab'
           echo 'Compiled only; speed and quality on Redmi are NOT yet measured.'
+
+      - name: Prepare experimental APK for direct download
+        run: |
+          set -euo pipefail
+          mkdir -p speedlab
+          cp android/app/build/outputs/apk/debug/app-debug.apk speedlab/NOVA-Speed-Lab.apk
+          (cd speedlab && sha256sum NOVA-Speed-Lab.apk > SHA256SUMS.txt)
+          (cd speedlab && zip -9 -q NOVA-Speed-Lab-ZIP.zip NOVA-Speed-Lab.apk SHA256SUMS.txt)
+          unzip -t speedlab/NOVA-Speed-Lab-ZIP.zip
+      - name: Save experimental APK in GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-CPU-Speed-Lab-${{ github.run_number }}
+          path: |
+            speedlab/NOVA-Speed-Lab.apk
+            speedlab/SHA256SUMS.txt
+            speedlab/NOVA-Speed-Lab-ZIP.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish explicitly experimental test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "nova-cpu-speedlab-${{ github.run_number }}" \
+            speedlab/NOVA-Speed-Lab.apk speedlab/NOVA-Speed-Lab-ZIP.zip speedlab/SHA256SUMS.txt \
+            --target "${{ github.sha }}" \
+            --title "NOVA CPU Speed Lab #${{ github.run_number }} — EXPERIMENT" \
+            --prerelease \
+            --notes "EXPERIMENTAL ANDROID APP. It installs as ai.nova.director.speedlab beside the stable NOVA (different package and app storage). Never delete or uninstall stable NOVA to test this. Snapdragon ARM FP16/DOTPROD CPU optimization was compiled but has NOT been speed/quality validated on a real phone; do not assume faster rendering. It will need its own image model import because app storage is separate. APK signed with an ephemeral test key: not an in-place stable update. Same 512px 12-step SD 1.5 rendering, no experimental GPU. Use ZIP if a mobile browser hangs finalizing an APK."
