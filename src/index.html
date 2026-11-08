@@ -334,7 +334,10 @@ async function handleStoryImageMessage(text){
    },
    onFrame:({scene,result,completed,total})=>{
     history.push({who:'nova',text:'✅ Кадр '+completed+' из '+total+
-      ' создан и сохранён в Галерею → Pictures/NOVA.\n'+scene.beat,
+      ' создан и сохранён в Галерею → Pictures/NOVA.\n'+scene.beat+
+      '\n⏱ Загрузка SD: '+(Number(result.modelLoadMs||0)/60000).toFixed(1)+
+      ' мин · вычисление: '+(Number(result.samplingMs||0)/60000).toFixed(1)+
+      ' мин. 512×512, 12 шагов, CPU.',
       preview:result.preview});
     saveHistory();
     if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
