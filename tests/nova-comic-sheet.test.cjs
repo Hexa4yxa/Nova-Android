@@ -72,7 +72,7 @@ test('NOVA makes ONE comic sheet, preserving the three original project images',
  assert.deepEqual(Array.from(x.calls.built[0].frames.map(f=>f.imageUri)),frames);
  const current=x.director.read()[0];
  assert.equal(current.comicPageUri,page);
- assert.deepEqual(current.comicFrameUris,frames);
+ assert.deepEqual(Array.from(current.comicFrameUris),frames);
  assert.deepEqual(Array.from(current.scenes.map(s=>s.imageUri)),frames);
  await x.button('Комикс-лист').onclick();
  assert.equal(x.calls.opened[0].pageUri,page);
