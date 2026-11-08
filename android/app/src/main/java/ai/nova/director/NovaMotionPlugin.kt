@@ -182,7 +182,8 @@ class NovaMotionPlugin : Plugin() {
         var descriptor: android.os.ParcelFileDescriptor? = null
         try {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            surface = codec.createInputSurface()
+            val inputSurface = codec.createInputSurface()
+            surface = inputSurface
             codec.start()
             codecStarted = true
             descriptor = context.contentResolver.openFileDescriptor(output, "w")
@@ -225,7 +226,7 @@ class NovaMotionPlugin : Plugin() {
                         if (!end && index < 0) return
                     }
                 }
-                egl = PanelRenderer(surface, width, height)
+                egl = PanelRenderer(inputSurface, width, height)
                 val renderer = egl ?: error("Не удалось открыть видеоповерхность.")
                 for ((scene, uri) in frames.withIndex()) {
                     checkActive()
