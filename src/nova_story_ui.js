@@ -231,6 +231,80 @@ function render(api) {
     render(api);
    }
   };
+  // Director edit uses exactly the same existing PNGs, never regenerates them.
+  const storyboardShots=root.NovaStoryboard?.plan(story)||[];
+  const storyboardBar=node(storyBox,'div','brain-row');
+  const storyboardPreview=node(storyboardBar,'button','council-button',
+   '📋 Планы ('+storyboardShots.length+')');
+  storyboardPreview.disabled=storyboardShots.length===0;
+  const storyboardExport=node(storyboardBar,'button','council-button',
+   '🎬 Режиссёрский монтаж · '+storyboardShots.length+' планов');
+  storyboardExport.disabled=!canEdit()||!motion?.render||storyboardShots.length===0;
+  const storyboardStop=node(storyboardBar,'button','council-button','■ Остановить монтаж');
+  storyboardStop.style.display='none';
+  const storyboardStatus=node(storyBox,'p','small','');
+  const storyboardPanel=node(storyBox,'div','');
+  storyboardPanel.hidden=true;
+  node(storyboardPanel,'p','small',
+   'Раскадровка видна только в редакторе. В MP4 один кадр проявляется из темноты за другим.');
+  storyboardShots.forEach((shot,index)=>{
+   node(storyboardPanel,'p','small',String(index+1)+'. Сцена '+shot.sceneNumber+
+    ' · '+shot.planLabel+' · '+shot.motionLabel+' · '+shot.durationSeconds+
+    ' с'+(shot.accent?' ★':''));
+  });
+  storyboardPreview.onclick=()=>{storyboardPanel.hidden=!storyboardPanel.hidden;};
+  storyboardStop.onclick=()=>{
+   storyboardStatus.textContent='■ Останавливаю монтаж...';
+   state.motionStop?.();
+  };
+  storyboardExport.onclick=async()=>{
+   if(!canEdit()||!motion?.render||!storyboardShots.length)return;
+   if(!confirm('Сделать режиссёрский видеокомикс: '+readyFrames.length+
+    ' изображений → '+storyboardShots.length+
+    ' планов? Всё офлайн, пока БЕЗ звука. Исходные картинки и истории не изменяются.'))return;
+   state.motionBusy=true;
+   state.motionStoryId=story.id;
+   state.motionStatus='🎞 Смонтировано 0 из '+storyboardShots.length+' планов';
+   storyboardStatus.textContent=state.motionStatus;
+   storyboardExport.disabled=true;
+   movie.disabled=true;
+   storyboardStop.style.display='';
+   state.motionStop=()=>{
+    state.motionStatus='■ Останавливаю монтаж...';
+    motion.cancel?.().catch(()=>{});
+   };
+   let listener=null;
+   try{
+    if(motion.addListener)listener=await motion.addListener('novaMotionProgress',progress=>{
+     state.motionStatus='🎞 Смонтировано '+Number(progress.done||0)+' из '+
+      storyboardShots.length+' планов';
+     storyboardStatus.textContent=state.motionStatus;
+    });
+    const result=await motion.render({shots:storyboardShots});
+    if(!result?.saved||typeof result.videoUri!=='string')
+     throw Error('Android не подтвердил сохранение MP4.');
+    const projects=director.read();
+    const current=projects.find(p=>p.id===story.id);
+    if(current){
+     current.movieUri=result.videoUri;
+     current.movieSeconds=result.seconds;
+     if(!director.write(projects))
+      throw Error('MP4 уже сохранён в Галерею, но не записался в проект.');
+    }
+    state.error='';
+    state.notice='✅ Режиссёрский MP4 сохранён в Галерею → Фильмы/NOVA. Пока без звука.';
+   }catch(error){
+    state.error='Монтаж не завершён: '+(error?.message||String(error))+
+     '. Исходные PNG и проект не удалены.';
+   }finally{
+    try{await listener?.remove();}catch(_){}
+    state.motionStop=null;
+    state.motionBusy=false;
+    state.motionStoryId='';
+    state.motionStatus='';
+    render(api);
+   }
+  };
   const editRow=node(storyBox,'div','brain-row');
   editRow.style.display='none';
   const nameInput=node(editRow,'input','council-input');
