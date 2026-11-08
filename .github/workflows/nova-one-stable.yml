@@ -19,6 +19,10 @@ concurrency:
 jobs:
   stable:
     runs-on: ubuntu-latest
+    env:
+      # Same ARMv8.2 FP16/DOTPROD flags used by the device-tested Speed Lab.
+      # Applies only to the native CPU image engine; Adreno GPU stays excluded.
+      NOVA_CPU_ARM_TUNED: '1'
     steps:
       - name: Confirm approved manual release entrypoint
         shell: bash
@@ -33,7 +37,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: 8959fd9435263f9e92f72d8e8c6fd23e2c6e287b
+          ref: 93d4bc2be2ab5116e7643f0d0bdc6efb995e5b90
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -191,7 +195,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt release/NOVA-Official-Stable-ZIP.zip \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable: lightweight owner-signed CPU-only update to restore unfinished story image generation after Android app/WebView interruption. Existing completed frames are skipped and are NEVER rerendered automatically. In Projects, tap Continue from frame 2 to resume saved story, with a Stop button. Images and stories remain in Galleries and Projects. Progress now distinguishes backend operations from 12 requested SD steps. No GPU experimental backend; Gemini/Gemma and SD 1.5 unchanged. This does NOT accelerate the CPU sampler; previous 98-minute renders can remain slow. Same ai.nova.director.stable package and certificate; do not uninstall or clear data. ZIP alternative is also published for Android download stalls." \
+            --notes "NOVA Official Stable: combines existing offline Gemma, story projects and saved-scene resume with the ARMv8.2 FP16/DOTPROD native CPU optimization from the device-tested Speed Lab. Original SD1.5 model, 512x512 and 12-step quality settings are preserved; no experimental Adreno GPU. Speed Lab previously rendered frames in 416 and 574 seconds, but this does NOT establish an exact same-workload speedup versus older NOVA. Android process and thermal conditions matter; older ARM64 CPUs without FP16/DOTPROD instructions may not support this build. Only install on the target Snapdragon device. Uses the SAME owner-signed ai.nova.director.stable app package: update in place, do not uninstall or clear app data, models, projects or gallery PNGs. Includes APK and ZIP for alternative download delivery." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
