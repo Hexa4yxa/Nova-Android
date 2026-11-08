@@ -1,0 +1,60 @@
+name: NOVA Motion Comic MVP - Android compile and offline regression
+
+on:
+  push:
+    branches: [feature/nova-motion-comic-mvp-20261108]
+  pull_request:
+    branches: [release/nova-one-stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned native LLM
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+      - name: Checkout pinned native image engine
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned Android native toolchain
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+      - name: Check all saved-project, model and Motion Comic contracts
+        run: |
+          npm ci
+          node --test tests/*.test.cjs
+          node --check src/nova_story_ui.js
+          node --check src/nova_tool_registry.js
+      - name: Compile Android video bridge and preserve native image engine
+        run: |
+          npx cap sync android
+          cd android
+          bash gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Verify native image engine remains present
+        run: |
+          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libnova-image.so'
+      # This test build is NOT delivered as an app. Official stable signing
+      # and on-phone MediaCodec verification are separate release gates.

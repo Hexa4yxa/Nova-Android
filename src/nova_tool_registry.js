@@ -69,6 +69,7 @@
     const council = !!(plugins && plugins.NovaBrain &&
       typeof plugins.NovaBrain.directorCouncil === 'function');
     const tools = !!(plugins && plugins.NovaTools);
+    const motion = !!(plugins && plugins.NovaMotion && typeof plugins.NovaMotion.render === 'function');
 
     const imageDescription = !image.available ?
       'Создание изображений сейчас недоступно: ' + image.detail :
@@ -85,14 +86,16 @@
     if (route.tool === 'image')
       return imageDescription;
     if (route.tool === 'video')
-      return 'Я могу разрабатывать сценарии и обсуждать монтаж с режиссёрским советом, ' +
+      return motion ?
+        'Могу собрать немой офлайн-видеокомикс MP4 из готовых картинок: открой «Проекты» и нажми «Создать видеокомикс». Озвучка и полноценная анимация ещё не подключены.' :
+        'Я могу разрабатывать сценарии и обсуждать монтаж с режиссёрским советом, ' +
         'но автоматический монтаж видео внутри этой APK ещё не подключён. Не буду делать вид, что уже смонтировала ролик.';
     const parts = [];
     if (text) parts.push('общаюсь через локальную языковую модель');
     if (council) parts.push('обсуждаю сценарии с режиссёрским советом и текстовым Critic');
     if (tools) parts.push('использую инструменты NOVA для разрешённых тобой загрузок');
     parts.push(imageDescription);
-    parts.push('Видеомонтаж и офлайн-голос пока не подключены в этой тестовой APK.');
+    parts.push(motion ? 'Из готовых картинок делаю немой видеокомикс MP4 в «Проектах», но офлайн-озвучка и полноценная анимация пока не подключены.' : 'Видеомонтаж и офлайн-голос пока не подключены в этой тестовой APK.');
     return parts.join('. ').replace(/\.\./g, '.');
   }
 

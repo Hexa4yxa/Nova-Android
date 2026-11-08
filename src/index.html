@@ -325,7 +325,7 @@ async function handleStoryImageMessage(text){
  showChat();
  try{
   const outcome=await window.NovaStoryChat.run({
-   text,brain,
+   text,brain,sceneCount:6,
    generate:(prompt,onProgress)=>executeImageGeneration(prompt,onProgress,512,12),
    isCancelled:()=>cancelled,
    onStatus:update,

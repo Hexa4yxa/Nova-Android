@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:'',projectQuery:''};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -16,18 +16,25 @@ function render(api) {
  content.replaceChildren();
  const shell=node(content,'section','panel');
  node(shell,'div','council-heading','🎬 NOVA · Мои истории');
- node(shell,'p','small','Расскажи идею. Gemma сама создаст раскадровку и английские промпты. Истории сохраняются на телефоне. Каждый кадр запускается только с твоего разрешения.');
+ node(shell,'p','small','Расскажи идею. Gemma создаст шесть последовательных сцен в два этапа по три и подготовит английские промпты. Старые проекты сохраняются. Каждый кадр запускается только с твоего разрешения.');
 
  const archiveTools=root.Capacitor?.Plugins?.NovaTools;
+ const motion=root.Capacitor?.Plugins?.NovaMotion;
  const archiveBar=node(shell,'div','brain-row');
  const exportBtn=node(archiveBar,'button','council-button','💾 Сохранить копию историй');
  const importBtn=node(archiveBar,'button','council-button','♻️ Восстановить истории из копии');
  const backupFeedback=node(archiveBar,'p','small',
    state.backupMessage||'Копия сохраняет истории и промпты. Файлы PNG в Галерее остаются отдельно.');
- const archiveDisabled=state.creating||state.drawing||state.backupBusy||isBusy();
+ const archiveDisabled=state.creating||state.drawing||state.backupBusy||state.motionBusy||isBusy();
  exportBtn.disabled=archiveDisabled||!archiveTools||director.read().length===0;
  importBtn.disabled=archiveDisabled||!archiveTools;
  if(!archiveTools)backupFeedback.textContent='Архивирование недоступно в этой сборке NOVA.';
+ if(state.motionBusy){
+  const activeBar=node(shell,'div','brain-row');
+  node(activeBar,'p','small',state.motionStatus||'🎞 NOVA создаёт видеокомикс...');
+  const stop=node(activeBar,'button','council-button','■ Остановить монтаж');
+  stop.onclick=()=>{if(state.motionStop)state.motionStop();};
+ }
  exportBtn.onclick=async()=>{
   if(state.backupBusy||state.creating||state.drawing||isBusy()||!archiveTools)return;
   state.backupBusy=true;exportBtn.disabled=true;importBtn.disabled=true;
@@ -57,27 +64,33 @@ function render(api) {
  editor.maxLength=380;
  editor.value=state.idea;
  editor.oninput=()=>{state.idea=editor.value};
- const button=node(shell,'button','council-button','🧠 NOVA, придумай три сцены');
+ const button=node(shell,'button','council-button','🧠 NOVA, придумай 6 сцен');
  const feedback=node(shell,'p','small',state.error?'⚠ '+state.error:state.notice);
- button.disabled=state.creating||state.drawing||isBusy()||!brain;
+ button.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||!brain;
  if(!brain) feedback.textContent='Нет доступа к локальной Gemma.';
  button.onclick=async()=>{
-  if(state.creating||state.drawing||isBusy())return;
+  if(state.creating||state.drawing||state.motionBusy||isBusy())return;
   state.creating=true;
   button.disabled=true;
   state.error='';
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
    const question=director.ideaRequest(state.idea,3);
-   // The text model can be unloaded by SD1.5 to save memory.
+   // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
+   // No new models and no image generation until the plan is safely saved.
    const status=await brain.status();
    if(status.engine!=='ModelReady')await brain.prepare();
    const response=await brain.chat({message:question,maxTokens:512});
-   const story=director.parse(response?.answer,state.idea);
+   const first=director.parse(response?.answer,state.idea);
+   feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
+   const second=await brain.chat({
+    message:director.continuationRequest(state.idea,first),maxTokens:512
+   });
+   const story=director.appendContinuation(first,second?.answer);
    const saved=director.read();
    saved.push(story);
    if(!director.write(saved))throw Error('Нет места для сохранения плана истории на телефоне.');
-   state.notice='✅ NOVA подготовила историю. Промпты готовы, картинки ещё не запущены.';
+   state.notice='✅ NOVA подготовила 6 сцен. Промпты готовы, картинки ещё не запущены.';
   }catch(e){state.error=e?.message||String(e);}
   finally{state.creating=false;render(api);}
  };
@@ -99,7 +112,7 @@ function render(api) {
  const removeSelected=node(bulk,'button','council-button','🗑 Удалить выбранные');
  const selectedIds=new Set();
  const cards=[];
- const canEdit=()=>!state.creating&&!state.drawing&&!state.backupBusy&&!isBusy();
+ const canEdit=()=>!state.creating&&!state.drawing&&!state.backupBusy&&!state.motionBusy&&!isBusy();
  function showSelection() {
   selectedCount.textContent='Выбрано: '+selectedIds.size;
   removeSelected.disabled=!canEdit()||selectedIds.size===0;
@@ -156,6 +169,68 @@ function render(api) {
   rename.disabled=!canEdit();
   eraseOne.disabled=!canEdit();
   eraseOne.onclick=()=>erase(new Set([story.id]));
+
+  // Render existing Gallery PNGs only. No fake video, cloud service or new
+  // image generation. Keep the project and original frames unchanged.
+  const readyFrames=story.scenes
+   .map(scene=>typeof scene.imageUri==='string'?scene.imageUri:'')
+   .filter(uri=>/^content:\/\/media\/[^/]+\/images\/media\/\d+/i.test(uri));
+  const motionRow=node(storyBox,'div','brain-row');
+  const movie=node(motionRow,'button','council-button',
+   '🎞 Создать видеокомикс · '+readyFrames.length+' кадр(ов)');
+  movie.disabled=!canEdit()||!motion?.render||readyFrames.length===0;
+  const openMovie=node(motionRow,'button','council-button','▶ Смотреть MP4');
+  openMovie.disabled=!motion?.openVideo||!story.movieUri||state.motionBusy;
+  openMovie.style.display=story.movieUri?'':'none';
+  openMovie.onclick=async()=>{
+   try{await motion.openVideo({videoUri:story.movieUri});}
+   catch(e){state.error='Не удалось открыть видео: '+(e?.message||String(e));render(api);}
+  };
+  if(state.motionBusy&&state.motionStoryId===story.id){
+   node(storyBox,'p','small',state.motionStatus||'🎞 NOVA создаёт MP4...');
+  }
+  if(story.movieUri)node(storyBox,'p','small',
+   '✅ MP4 сохранён в Галерею → Фильмы/NOVA ('+(story.movieSeconds||'?')+' сек, без звука).');
+  movie.onclick=async()=>{
+   if(!canEdit()||!motion?.render||!readyFrames.length)return;
+   if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
+   state.motionBusy=true;
+   state.motionStoryId=story.id;
+   state.motionStatus='🎞 Создаю видео локально: 0 из '+readyFrames.length+' кадров';
+   movie.disabled=true;
+   let listener=null;
+   state.motionStop=()=>{state.motionStatus='■ Останавливаю монтаж...';motion.cancel?.().catch(()=>{});};
+   try{
+    if(motion.addListener){
+     listener=await motion.addListener('novaMotionProgress',event=>{
+      state.motionStatus='🎞 Смонтировано '+Number(event.done||0)+' из '+readyFrames.length+' кадров';
+     });
+    }
+    const outcome=await motion.render({frames:readyFrames,secondsPerFrame:4});
+    if(!outcome?.saved||typeof outcome.videoUri!=='string')throw Error('Android не подтвердил сохранение видео.');
+    const projects=director.read();
+    const current=projects.find(entry=>entry.id===story.id);
+    if(current){
+     current.movieUri=outcome.videoUri;
+     current.movieSeconds=outcome.seconds;
+     if(!director.write(projects)){
+      throw Error('MP4 уже сохранён в Фильмы/NOVA, но ссылку не удалось записать в проект.');
+     }
+    }
+    state.error='';
+    state.notice='✅ NOVA сохранила MP4 в Галерею → Фильмы/NOVA. Пока без звука.';
+   }catch(e){
+    state.error='Монтаж не завершён: '+(e?.message||String(e))+
+     '. PNG и история не удалены.';
+   }finally{
+    try{await listener?.remove();}catch(_){}
+    state.motionStop=null;
+    state.motionBusy=false;
+    state.motionStoryId='';
+    state.motionStatus='';
+    render(api);
+   }
+  };
   const editRow=node(storyBox,'div','brain-row');
   editRow.style.display='none';
   const nameInput=node(editRow,'input','council-input');
@@ -199,10 +274,10 @@ function render(api) {
     '▶ Продолжить с кадра '+remaining[0].number);
    const stopButton=node(resumePanel,'button','council-button','■ Остановить продолжение');
    const progress=node(resumePanel,'p','small','');
-   resumeButton.disabled=state.creating||state.drawing||isBusy()||typeof resumeStory!=='function';
+   resumeButton.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||typeof resumeStory!=='function';
    stopButton.disabled=true;
    resumeButton.onclick=async()=>{
-    if(state.drawing||state.creating||isBusy()||typeof resumeStory!=='function')return;
+    if(state.drawing||state.creating||state.motionBusy||isBusy()||typeof resumeStory!=='function')return;
     if(!confirm('Продолжить историю с кадра '+remaining[0].number+
      '? Генерация на CPU может занять много времени. Готовые кадры сохранятся.'))return;
     state.drawing=true;
@@ -253,9 +328,9 @@ function render(api) {
    if(scene.imageUri)node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
    const progress=node(row,'p','small','');
    const draw=node(row,'button','council-button','🎨 Создать кадр '+scene.number+' · 512×512');
-   draw.disabled=state.creating||state.drawing||isBusy();
+   draw.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
    draw.onclick=async()=>{
-    if(state.drawing||state.creating||isBusy())return;
+    if(state.drawing||state.creating||state.motionBusy||isBusy())return;
     if(!confirm('Нарисовать сцену '+scene.number+'? Сейчас на CPU это может занять около 20 минут. Качество и модель останутся прежними.'))return;
     state.drawing=true;draw.disabled=true;
     try{

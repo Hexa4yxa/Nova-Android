@@ -28,7 +28,7 @@
  }
  async function run(options){
   const {text,brain,generate,onStatus=()=>{},onPlanned=()=>{},
-   onFrame=()=>{},isCancelled=()=>false}=options||{};
+   onFrame=()=>{},isCancelled=()=>false,sceneCount=3}=options||{};
   const director=root.NovaStoryDirector;
   if(!director||!brain||typeof generate!=='function')
    throw Error('Режиссёр или графический инструмент NOVA недоступен.');
@@ -40,7 +40,16 @@
   if(isCancelled())return {cancelled:true,completed:0};
   const plan=await brain.chat({message:director.ideaRequest(idea,3),maxTokens:512});
   if(isCancelled())return {cancelled:true,completed:0};
-  const story=director.parse(plan?.answer,idea);
+  const first=director.parse(plan?.answer,idea);
+  let story=first;
+  if(sceneCount===6){
+   onStatus('🧠 Сцены 1–3 готовы, NOVA планирует сцены 4–6...');
+   const followup=await brain.chat({
+    message:director.continuationRequest(idea,first),maxTokens:512
+   });
+   if(isCancelled())return {cancelled:true,completed:0};
+   story=director.appendContinuation(first,followup?.answer);
+  }
   const existing=director.read();
   if(existing.some(item=>item.id===story.id))throw Error('Совпал идентификатор истории. Попробуй ещё раз.');
   if(!director.write(existing.concat([story])))

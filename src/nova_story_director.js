@@ -65,13 +65,53 @@ function validate(result,original) {
  };
 }
 function parse(raw,original){return validate(extract(raw),original);}
+
+/* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
+   Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
+   This does not change the format of older 1-3 scene stories. */
+function continuationRequest(original,first) {
+ if(!first||!Array.isArray(first.scenes)||first.scenes.length!==3)
+  throw Error('Сначала нужно подготовить три начальные сцены.');
+ const subject=clean(original,380);
+ return [
+  'You are NOVA, continuing an ORIGINAL six-scene motion-comic story.',
+  'The owner\'s original story: '+subject,
+  'The first THREE scenes have ALREADY happened:',
+  first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
+  'The SAME protagonist MUST be: '+clean(first.hero,180),
+  'The SAME visual style MUST be: '+clean(first.style,130),
+  'Write ONLY the NEXT THREE distinct scenes (scenes FOUR, FIVE, SIX). Each advances the plot; scene 6 gives a powerful ending.',
+  'Return ONLY one compact JSON object, no Markdown, with these fields:',
+  '{"title":"same story title","hero":"same English appearance anchor","style":"same English style anchor","scenes":[{"beat":"short Russian action","prompt":"short English SD1.5 visible scene prompt"}]}',
+  'Use exactly 3 new scenes, no duplicates of the first three.',
+  'Each English prompt starts with concrete subject, ACTION and LOCATION; maintain protagonist identity and settings.',
+  'Keep each new prompt around 25-38 English words; be concise enough for a 512-token local reply.',
+  'No explanations outside JSON.'
+ ].join('\n');
+}
+function appendContinuation(first,raw) {
+ if(!first||!Array.isArray(first.scenes)||first.scenes.length!==3)
+  throw Error('Не найден первый блок из трёх сцен.');
+ // Validate the second reply with the ORIGINAL hero and visual style:
+ // the second model call must never silently replace our protagonist.
+ const parsed=extract(raw);
+ if(!Array.isArray(parsed.scenes)||parsed.scenes.length!==3)
+  throw Error('NOVA должна завершить историю тремя дополнительными сценами.');
+ const more=validate({
+  title:first.title,hero:first.hero,style:first.style,scenes:parsed.scenes
+ },first.idea);
+ return {...first,
+  scenes:first.scenes.concat(more.scenes.map((scene,i)=>({...scene,number:i+4})))
+ };
+}
+
 function read(){
  try{
   const saved=JSON.parse(localStorage.getItem(KEY)||'[]');
   if(!Array.isArray(saved))return [];
   // Never discard the owner's older projects when a seventh story is created.
   return saved.filter(x=>x&&typeof x==='object'&&typeof x.id==='string'&&
-    typeof x.title==='string'&&Array.isArray(x.scenes)&&x.scenes.length<=3);
+    typeof x.title==='string'&&Array.isArray(x.scenes)&&x.scenes.length<=6);
  }catch(_){return []}
 }
 function write(stories) {
@@ -93,7 +133,7 @@ function validBackupStory(item) {
  return item && typeof item==='object' && !Array.isArray(item) &&
    typeof item.id==='string' && item.id.length>0 && item.id.length<=180 &&
    typeof item.title==='string' && item.title.length>0 &&
-   Array.isArray(item.scenes) && item.scenes.length>0 && item.scenes.length<=3 &&
+   Array.isArray(item.scenes) && item.scenes.length>0 && item.scenes.length<=6 &&
    item.scenes.every(scene=>scene && typeof scene==='object' &&
      typeof scene.beat==='string' && typeof scene.prompt==='string' &&
      scene.beat.length<=1000 && scene.prompt.length<=1500);
@@ -121,5 +161,5 @@ function mergeBackup(payload) {
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
-root.NovaStoryDirector=Object.freeze({ideaRequest,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
