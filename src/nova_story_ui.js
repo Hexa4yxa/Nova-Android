@@ -553,6 +553,35 @@ function render(api) {
    const row=node(scenesPanel,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);
    node(row,'p','small',scene.beat);
+   const voiceDetails=node(row,'details','nova-more');
+   node(voiceDetails,'summary','','🎙 Озвучка и диалог');
+   node(voiceDetails,'p','small','По умолчанию NOVA произнесёт описание сцены. Можно заменить его репликой героя.');
+   const voiceText=node(voiceDetails,'textarea','council-input');
+   voiceText.maxLength=120;
+   voiceText.value=scene.voiceText||scene.beat;
+   voiceText.setAttribute('aria-label','Текст озвучки сцены '+scene.number);
+   const voiceRole=node(voiceDetails,'select','council-input');
+   const narratorOption=node(voiceRole,'option','','Рассказчик');
+   narratorOption.value='narrator';
+   const characterOption=node(voiceRole,'option','','Персонаж');
+   characterOption.value='character';
+   voiceRole.value=scene.voiceRole==='character'?'character':'narrator';
+   const saveVoice=node(voiceDetails,'button','council-button','💾 Сохранить реплику');
+   saveVoice.disabled=!canEdit();
+   saveVoice.onclick=()=>{
+    if(!canEdit())return;
+    const text=voiceText.value.trim().slice(0,120);
+    if(!text){state.error='Нужен текст для реплики.';render(api);return;}
+    const saved=director.read();
+    const current=saved.find(p=>p.id===story.id);
+    const shot=current?.scenes.find(s=>s.number===scene.number);
+    if(!shot){state.error='Сцена не найдена.';render(api);return;}
+    shot.voiceText=text;
+    shot.voiceRole=voiceRole.value==='character'?'character':'narrator';
+    if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
+    else{state.error='';state.notice='✅ Реплика сцены '+scene.number+' сохранена.';}
+    render(api);
+   };
    const details=node(row,'details','nova-more');
    node(details,'summary','','📝 Промпт NOVA для SD 1.5');
    node(details,'p','small',scene.prompt);
