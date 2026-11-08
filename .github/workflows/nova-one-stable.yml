@@ -32,12 +32,12 @@ jobs:
             exit 1
           fi
 
-      # Exact reviewed commit includes compact Brains UI, image speed presets and all regression tests.
+      # Reviewed integration adds project organizer; UI regression tests passed. Release still verifies all Node/Kotlin tests, permanent signature and package before upload.
       # Advance this pin only after subsequent green CI.
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: 93d4bc2be2ab5116e7643f0d0bdc6efb995e5b90
+          ref: f17801031bc85f953b04fc85b6bf39bd93405f1d
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
