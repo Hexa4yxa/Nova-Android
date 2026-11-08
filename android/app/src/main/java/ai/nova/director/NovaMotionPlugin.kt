@@ -119,6 +119,27 @@ class NovaMotionPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun openVideo(call: PluginCall) {
+        val raw = call.getString("videoUri") ?: ""
+        val uri = Uri.parse(raw)
+        if (uri.scheme != "content" || uri.authority != "media" ||
+            uri.path?.contains("/video/media/") != true) {
+            call.reject("В проекте нет доступного видео NOVA.")
+            return
+        }
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "video/mp4")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivity(intent)
+            call.resolve(JSObject().apply { put("opened", true) })
+        } catch (error: Exception) {
+            call.reject("Не удалось открыть MP4: " + (error.message ?: "нет видеоплеера"))
+        }
+    }
+
+    @PluginMethod
     fun cancel(call: PluginCall) {
         stopRequested.set(true)
         call.resolve(JSObject().apply { put("requested", working.get()) })
