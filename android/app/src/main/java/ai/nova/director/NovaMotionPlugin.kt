@@ -43,7 +43,10 @@ import kotlin.math.roundToInt
  * Narration, sound effects and subtitles are NOT part of this first milestone.
  */
 /** A shot references a saved Gallery image. It never modifies the PNG. */
-private data class ComicShot(val uri: Uri, val seconds: Int, val plan: String, val motion: String)
+private data class ComicShot(
+    val uri: Uri, val seconds: Int, val plan: String, val motion: String,
+    val panelIndex: Int = -1, val panelCount: Int = 0, val effect: String = "none"
+)
 
 @CapacitorPlugin(name = "NovaMotion")
 class NovaMotionPlugin : Plugin() {
@@ -74,7 +77,17 @@ class NovaMotionPlugin : Plugin() {
                     require(motion in setOf("hold", "push", "pull", "pan-left", "pan-right", "tilt-up", "tilt-down")) {
                         "Неподдерживаемое движение камеры."
                     }
-                    ComicShot(uri, seconds, plan, motion)
+                    val panelIndex = item.optInt("panelIndex", -1)
+                    val panelCount = item.optInt("panelCount", 0)
+                    require((panelIndex == -1 && panelCount == 0) ||
+                        (panelCount in 1..6 && panelIndex in 0 until panelCount)) {
+                        "Неверный номер панели комикса."
+                    }
+                    val effect=item.optString("effect", "none")
+                    require(effect in setOf("none","rain","torch","glow","fog")) {
+                        "Неподдерживаемый эффект сцены."
+                    }
+                    ComicShot(uri,seconds,plan,motion,panelIndex,panelCount,effect)
                 }
             } else {
                 val frames: JSONArray = call.getArray("frames")
@@ -176,8 +189,9 @@ class NovaMotionPlugin : Plugin() {
     private fun frameBitmap(uri: Uri): Bitmap {
         val resolver = context.contentResolver
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val source=resolver.openInputStream(uri)
             ?: error("Не удалось открыть исходный кадр в Галерее.")
+        source.use { BitmapFactory.decodeStream(it, null, opts) }
         require(opts.outWidth > 0 && opts.outHeight > 0) { "Повреждённый PNG проекта." }
         val sample = generateSequence(1) { if (it * 2 <= min(opts.outWidth, opts.outHeight) / 1536) it * 2 else null }
             .last()
@@ -256,12 +270,12 @@ class NovaMotionPlugin : Plugin() {
                     checkActive()
                     val bitmap = frameBitmap(shot.uri)
                     try {
-                        renderer.setImage(bitmap)
+                        renderer.setImage(bitmap,shot.panelIndex,shot.panelCount)
                         val frameCount = shot.seconds * fps
                         for (frame in 0 until frameCount) {
                             checkActive()
                             val progress = frame.toFloat() / frameCount.toFloat()
-                            renderer.draw(progress, scene, shot.plan, shot.motion)
+                            renderer.draw(progress,scene,shot.plan,shot.motion,shot.effect)
                             renderer.present(frameIndex * 1_000_000_000L / fps)
                             frameIndex++
                             drain(false)
@@ -312,6 +326,13 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
     private val zoomLocation: Int
     private val offsetLocation: Int
     private val fadeLocation: Int
+    private val cropLocation: Int
+    private val effectLocation: Int
+    private val timeLocation: Int
+    private var cropLeft = 0f
+    private var cropTop = 0f
+    private var cropWidth = 1f
+    private var cropHeight = 1f
 
     init {
         check(display != EGL14.EGL_NO_DISPLAY) { "EGL-дисплей недоступен." }
@@ -349,9 +370,31 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
             uniform float uZoom;
             uniform vec2 uOffset;
             uniform float uFade;
+            uniform vec4 uCrop;
+            uniform float uEffect;
+            uniform float uTime;
             void main() {
-                vec2 uv = (vUv - 0.5) / uZoom + vec2(0.5) + uOffset;
-                gl_FragColor = vec4(texture2D(uTexture,clamp(uv,0.0,1.0)).rgb*uFade,1.0);
+                vec2 local = clamp((vUv - 0.5) / uZoom + vec2(0.5) + uOffset,0.0,1.0);
+                vec2 uv = uCrop.xy + local*uCrop.zw;
+                vec3 color=texture2D(uTexture,uv).rgb;
+                // Lightweight optical effects on the currently visible panel.
+                if(uEffect>0.5 && uEffect<1.5) {
+                    float band=floor(vUv.y*25.0);
+                    float random=fract(sin(band*12.9898)*43758.5453);
+                    float streak=1.0-smoothstep(0.0,0.040,
+                        abs(fract(vUv.x*20.0+random+uTime*1.8)-0.5));
+                    color=mix(color,vec3(0.83,0.89,1.0),streak*0.17);
+                } else if(uEffect>1.5 && uEffect<2.5) {
+                    float flicker=0.04+0.04*sin(uTime*15.0)+0.025*sin(uTime*29.0);
+                    color=clamp(color+vec3(flicker*1.5,flicker*0.65,0.0),0.0,1.0);
+                } else if(uEffect>2.5 && uEffect<3.5) {
+                    float shine=0.08+0.07*sin(uTime*4.0);
+                    color=mix(color,vec3(0.79,0.87,1.0),shine);
+                } else if(uEffect>3.5 && uEffect<4.5) {
+                    float haze=0.04+0.06*sin(vUv.y*8.0+vUv.x*4.0+uTime*0.6);
+                    color=mix(color,vec3(0.73,0.76,0.84),max(haze,0.0));
+                }
+                gl_FragColor=vec4(color*uFade,1.0);
             }
         """.trimIndent()
         program = GLES20.glCreateProgram()
@@ -370,6 +413,9 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         zoomLocation = GLES20.glGetUniformLocation(program, "uZoom")
         offsetLocation = GLES20.glGetUniformLocation(program, "uOffset")
         fadeLocation = GLES20.glGetUniformLocation(program, "uFade")
+        cropLocation = GLES20.glGetUniformLocation(program, "uCrop")
+        effectLocation = GLES20.glGetUniformLocation(program, "uEffect")
+        timeLocation = GLES20.glGetUniformLocation(program, "uTime")
         vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
             put(floatArrayOf(
                 -1f,-1f, 0f,1f,
@@ -391,10 +437,22 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         return id
     }
 
-    fun setImage(bitmap: Bitmap) {
+    fun setImage(bitmap: Bitmap, panelIndex: Int = -1, panelCount: Int = 0) {
         clearImage()
-        imageWidth = bitmap.width
-        imageHeight = bitmap.height
+        if(panelIndex>=0) {
+            val tile=NovaComicLayout.panel(panelIndex,panelCount)
+            // Use the saved SINGLE comic PNG, but display only one tile at a time.
+            cropLeft=tile.left.toFloat()/NovaComicLayout.WIDTH
+            cropTop=tile.top.toFloat()/NovaComicLayout.HEIGHT
+            cropWidth=tile.width().toFloat()/NovaComicLayout.WIDTH
+            cropHeight=tile.height().toFloat()/NovaComicLayout.HEIGHT
+            imageWidth=tile.width()
+            imageHeight=tile.height()
+        } else {
+            cropLeft=0f;cropTop=0f;cropWidth=1f;cropHeight=1f
+            imageWidth=bitmap.width
+            imageHeight=bitmap.height
+        }
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         texture = textures[0]
@@ -408,7 +466,7 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "Не удалось загрузить кадр в GPU." }
     }
 
-    fun draw(progress: Float, scene: Int, plan: String, motion: String) {
+    fun draw(progress: Float, scene: Int, plan: String, motion: String, effect: String = "none") {
         val t = progress.coerceIn(0f, 1f)
         GLES20.glViewport(0,0,width,height)
         GLES20.glClearColor(0f,0f,0f,1f)
@@ -449,6 +507,12 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         val departure = ((1f-t)/0.16f).coerceIn(0f,1f)
         val fade = (min(appearance,departure)).let { it*it*(3-2*it) }
         GLES20.glUniform1f(fadeLocation,fade)
+        GLES20.glUniform4f(cropLocation,cropLeft,cropTop,cropWidth,cropHeight)
+        GLES20.glUniform1f(timeLocation,scene*4f+t*4f)
+        val effectId=when(effect) {
+            "rain"->1f;"torch"->2f;"glow"->3f;"fog"->4f;else->0f
+        }
+        GLES20.glUniform1f(effectLocation,effectId)
         vertices.position(0)
         GLES20.glEnableVertexAttribArray(positionLocation)
         GLES20.glVertexAttribPointer(positionLocation,2,GLES20.GL_FLOAT,false,16,vertices)
