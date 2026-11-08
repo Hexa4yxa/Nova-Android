@@ -95,7 +95,7 @@ test('native Android encoder supports shot plans while retaining simple video mo
  assert.match(src,/shots\.length\(\) in 1\.\.16|editList\.length\(\) in 1\.\.16/);
  assert.match(src,/checkedImageUri/);
  assert.match(src,/sumOf \{ it\.seconds \}/);
- assert.match(src,/renderer\.draw\(progress, scene, shot\.plan, shot\.motion\)/);
+ assert.match(src,/renderer\.draw\(\s*progress,\s*scene,\s*shot\.plan,\s*shot\.motion,\s*shot\.effect\s*\)/);
  assert.match(src,/"pan-left"/);
  assert.match(src,/"close" -> 1\.65f/);
  assert.match(src,/MediaCodec\.createEncoderByType\(MediaFormat\.MIMETYPE_VIDEO_AVC\)/);
