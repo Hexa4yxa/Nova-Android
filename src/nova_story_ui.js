@@ -16,7 +16,7 @@ function render(api) {
  content.replaceChildren();
  const shell=node(content,'section','panel');
  node(shell,'div','council-heading','🎬 NOVA · Мои истории');
- node(shell,'p','small','Расскажи идею. Gemma сама создаст раскадровку и английские промпты. Истории сохраняются на телефоне. Каждый кадр запускается только с твоего разрешения.');
+ node(shell,'p','small','Расскажи идею. Gemma создаст шесть последовательных сцен в два этапа по три и подготовит английские промпты. Старые проекты сохраняются. Каждый кадр запускается только с твоего разрешения.');
 
  const archiveTools=root.Capacitor?.Plugins?.NovaTools;
  const motion=root.Capacitor?.Plugins?.NovaMotion;
@@ -64,7 +64,7 @@ function render(api) {
  editor.maxLength=380;
  editor.value=state.idea;
  editor.oninput=()=>{state.idea=editor.value};
- const button=node(shell,'button','council-button','🧠 NOVA, придумай три сцены');
+ const button=node(shell,'button','council-button','🧠 NOVA, придумай 6 сцен');
  const feedback=node(shell,'p','small',state.error?'⚠ '+state.error:state.notice);
  button.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||!brain;
  if(!brain) feedback.textContent='Нет доступа к локальной Gemma.';
@@ -76,15 +76,21 @@ function render(api) {
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
    const question=director.ideaRequest(state.idea,3);
-   // The text model can be unloaded by SD1.5 to save memory.
+   // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
+   // No new models and no image generation until the plan is safely saved.
    const status=await brain.status();
    if(status.engine!=='ModelReady')await brain.prepare();
    const response=await brain.chat({message:question,maxTokens:512});
-   const story=director.parse(response?.answer,state.idea);
+   const first=director.parse(response?.answer,state.idea);
+   feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
+   const second=await brain.chat({
+    message:director.continuationRequest(state.idea,first),maxTokens:512
+   });
+   const story=director.appendContinuation(first,second?.answer);
    const saved=director.read();
    saved.push(story);
    if(!director.write(saved))throw Error('Нет места для сохранения плана истории на телефоне.');
-   state.notice='✅ NOVA подготовила историю. Промпты готовы, картинки ещё не запущены.';
+   state.notice='✅ NOVA подготовила 6 сцен. Промпты готовы, картинки ещё не запущены.';
   }catch(e){state.error=e?.message||String(e);}
   finally{state.creating=false;render(api);}
  };
