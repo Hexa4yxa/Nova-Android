@@ -37,7 +37,7 @@ jobs:
       - name: Checkout CI-verified NOVA source
         uses: actions/checkout@v4
         with:
-          ref: 7a3d45b8439e7d1aa94c6e90cd1886edd733df45
+          ref: 2446970ff29d91a183e9af3ea72131980e2d68e3
 
       - name: Checkout pinned llama.cpp
         uses: actions/checkout@v4
@@ -195,7 +195,7 @@ jobs:
         run: |
           gh release create "nova-official-one-${{ github.run_number }}" release/NOVA-Official-Stable.apk release/SHA256SUMS.txt release/NOVA-Official-Stable-ZIP.zip \
             --title "NOVA Official Stable #${{ github.run_number }}" --prerelease \
-            --notes "NOVA Official Stable: adds offline six-scene Gemma storyboarding and silent Motion Comic MP4 from saved PNGs using Android H.264 and OpenGL ES. The video renderer must still be validated on the target Redmi, and no audio or full character animation is claimed. Also retains existing offline Gemma, story projects and saved-scene resume with the ARMv8.2 FP16/DOTPROD native CPU optimization from the device-tested Speed Lab. Original SD1.5 model, 512x512 and 12-step quality settings are preserved; no experimental Adreno GPU. Speed Lab previously rendered frames in 416 and 574 seconds, but this does NOT establish an exact same-workload speedup versus older NOVA. Android process and thermal conditions matter; older ARM64 CPUs without FP16/DOTPROD instructions may not support this build. Only install on the target Snapdragon device. Uses the SAME owner-signed ai.nova.director.stable app package: update in place, do not uninstall or clear app data, models, projects or gallery PNGs. Includes APK and ZIP for alternative download delivery." \
+            --notes "NOVA Official Stable: adds offline six-scene Gemma storyboarding, one saved physical comic-page PNG, panel-by-panel H.264 MP4 with rain/torch/fog/glow visuals, and offline Android TTS narration with procedurally generated ambient sounds muxed as AAC. The speech capability depends on installed offline voices; missing voices preserve the silent MP4. The whole flow requires on-device validation and does NOT offer full AI character animation. Also retains existing offline Gemma, story projects and saved-scene resume with the ARMv8.2 FP16/DOTPROD native CPU optimization from the device-tested Speed Lab. Original SD1.5 model, 512x512 and 12-step quality settings are preserved; no experimental Adreno GPU. Speed Lab previously rendered frames in 416 and 574 seconds, but this does NOT establish an exact same-workload speedup versus older NOVA. Android process and thermal conditions matter; older ARM64 CPUs without FP16/DOTPROD instructions may not support this build. Only install on the target Snapdragon device. Uses the SAME owner-signed ai.nova.director.stable app package: update in place, do not uninstall or clear app data, models, projects or gallery PNGs. Includes APK and ZIP for alternative download delivery." \
             --target "$(git rev-parse HEAD)"
 
       - name: Explain release publishing fallback
