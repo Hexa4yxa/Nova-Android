@@ -16,6 +16,11 @@ android {
                 arguments '-DCMAKE_BUILD_TYPE=Release',
                           '-DGGML_NATIVE=OFF',
                           '-DGGML_OPENMP=OFF'
+                // Owner-signed stable uses the identical ARMv8.2 CPU kernels already built
+                // and exercised in Speed Lab on the target phone.
+                if (System.getenv('NOVA_CPU_ARM_TUNED') == '1') {
+                    arguments '-DNOVA_CPU_ARM_FP16_DOTPROD=ON'
+                }
                 // ONLY on the isolated CI GPU experiment, not on the signed Stable.
                 if (System.getenv('NOVA_EXPERIMENTAL_OPENCL') == '1') {
                     def clHeaders = System.getenv('NOVA_OPENCL_INCLUDE_DIR')
