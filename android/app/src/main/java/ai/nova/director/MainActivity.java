@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NovaImagePlugin.class);
         registerPlugin(NovaMotionPlugin.class);
         registerPlugin(NovaComicSheetPlugin.class);
+        registerPlugin(NovaVoicePlugin.class);
         registerPlugin(NovaImageModelsPlugin.class);
         registerPlugin(NovaModelBackupPlugin.class);
         super.onCreate(savedInstanceState);
