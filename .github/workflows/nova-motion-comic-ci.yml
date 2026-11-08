@@ -3,6 +3,8 @@ name: NOVA Motion Comic MVP - Android compile and offline regression
 on:
   push:
     branches: [feature/nova-motion-comic-mvp-20261108]
+  pull_request:
+    branches: [release/nova-one-stable]
   workflow_dispatch:
 
 permissions:
