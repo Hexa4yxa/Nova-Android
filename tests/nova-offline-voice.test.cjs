@@ -24,7 +24,7 @@ function setup(voices=true){
  const localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))};
  const calls={voice:[],motion:[]};
  const nativeVoice={
-  status:async()=>({available:voices,count:voices?2:0,detail:voices?'local':'No installed offline voices'}),
+  status:async()=>({available:voices,count:voices?2:0,voices:voices?[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]:[],detail:voices?'local':'No installed offline voices'}),
   dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};}
  };
  const nativeMotion={
@@ -35,7 +35,7 @@ function setup(voices=true){
  const window={Capacitor:{Plugins:{NovaMotion:nativeMotion,NovaVoice:nativeVoice}}};
  const document={createElement:t=>new Element(t)};
  const context=vm.createContext({window,document,localStorage,confirm:()=>true,console});
- for(const path of ['src/nova_story_director.js','src/nova_story_ui.js']){
+ for(const path of ['src/nova_story_director.js','src/nova_comic_narrator.js','src/nova_story_ui.js']){
   vm.runInContext(fs.readFileSync(path,'utf8'),context,{filename:path});
  }
  const director=window.NovaStoryDirector;
