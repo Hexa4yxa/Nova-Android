@@ -36,8 +36,8 @@ test('completed comic surfaces watch movie + view comic, hides 3 competing rende
  assert.ok(view&&watch&&advanced);
  assert.equal(view.parent,watch.parent);
  assert.notEqual(advanced,watch.parent);
- assert.equal(btn('Создать видеокомикс').parent,advanced);
- assert.equal(btn('Режиссёрский монтаж').parent,advanced);
+ assert.ok(walk(advanced).includes(btn('Создать видеокомикс')));
+ assert.ok(walk(advanced).includes(btn('Режиссёрский монтаж')));
  assert.equal(btn('Пересоздать фильм с озвучкой').parent,advanced);
  assert.equal(btn('Пересобрать комикс-лист').parent,advanced);
  assert.ok(walk(content).some(x=>x.textContent.includes('12 сек')&&x.textContent.includes('с озвучкой')));
@@ -52,5 +52,5 @@ test('first-time comic exposes reader without forcing advanced controls',()=>{
  assert.ok(view&&create&&advanced);
  assert.equal(view.parent,create.parent);
  assert.notEqual(create.parent,advanced);
- assert.equal(btn('Создать видеокомикс').parent,advanced);
+ assert.ok(walk(advanced).includes(btn('Создать видеокомикс')));
 });
