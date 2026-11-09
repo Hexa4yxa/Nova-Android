@@ -168,8 +168,19 @@ class NovaVoicePlugin : Plugin() {
             call.reject("Нужен MP4, уже сохранённый в Галерею NOVA.")
             return
         }
+        val selectedLanguage=call.getString("language") ?: "ru"
+        if(selectedLanguage!="ru" && selectedLanguage!="uk"){
+            call.reject("Нужно выбрать русский или украинский локальный голос.")
+            return
+        }
         val lines = try { parseLines(call.getArray("lines") ?: JSONArray()) }
                     catch(error:Exception){ call.reject(error.message ?: "Ошибка сценария озвучки.");return }
+        val cyrillic=Regex("[А-Яа-яЁёІіЇїЄєҐґ]")
+        val latin=Regex("[A-Za-z]")
+        if(lines.any { !cyrillic.containsMatchIn(it.text) || latin.containsMatchIn(it.text) }){
+            call.reject("NOVA не разрешает читать английские описания русским или украинским голосом.")
+            return
+        }
         if(!busy.compareAndSet(false,true)) {
             call.reject("Другая озвучка NOVA ещё выполняется.")
             return
@@ -178,9 +189,9 @@ class NovaVoicePlugin : Plugin() {
             var resultUri:Uri?=null
             try {
                 val t=availableEngine() ?: error("Офлайн-синтезатор не готов.")
-                val voices=localVoices(t)
+                val voices=localVoices(t).filter { it.locale.language==selectedLanguage }
                 require(voices.isNotEmpty()) {
-                    "В Android нет установленных офлайн-голосов ru/uk. Исходный немой MP4 сохранён."
+                    "На устройстве нет локального голоса языка "+selectedLanguage+". Немой MP4 сохранён."
                 }
                 val narrator=voices.first()
                 val character=voices.firstOrNull { it.name!=narrator.name && it.locale.language==narrator.locale.language }
@@ -228,6 +239,7 @@ class NovaVoicePlugin : Plugin() {
                     put("seconds",seconds)
                     put("voicedLines",lines.size)
                     put("voice",narrator.name)
+                    put("language",selectedLanguage)
                     put("distinctCharacterVoice",character.name!=narrator.name)
                     put("audio",true)
                 })
@@ -302,13 +314,20 @@ class NovaVoicePlugin : Plugin() {
     private fun addVoice(out:ShortArray,line:Line,wav:Wav) {
         val start=line.start*44100
         val allowed=min(line.duration*44100-4410,out.size-start)
-        val clipFrames=min(allowed,(wav.data.size.toLong()*44100/wav.rate).toInt())
+        val actualFrames=(wav.data.size.toLong()*44100/wav.rate).toInt()
+        // Do not quietly cut words in half: the user prefers a safe silent
+        // movie to an unintelligible dubbed movie.
+        require(actualFrames<=allowed+2205) {
+            "Реплика не помещается в четыре секунды. Сделай фразу короче."
+        }
+        val clipFrames=min(allowed,actualFrames)
         for(i in 0 until clipFrames){
             val source=i.toLong()*wav.rate/44100
             val sourceIndex=source.toInt().coerceIn(0,wav.data.size-1)
             val softEnd=min(1.0,(clipFrames-i)/2205.0)
             val value=(wav.data[sourceIndex].toInt()*0.85*softEnd).toInt()
-            out[start+i]=clamp(out[start+i].toInt()+value)
+            // Ambient sound stays in the background while narration speaks.
+            out[start+i]=clamp((out[start+i].toInt()*0.24).toInt()+value)
         }
     }
 
@@ -323,10 +342,10 @@ class NovaVoicePlugin : Plugin() {
             val t=(i-from)/44100.0
             val envelope=min(1.0,(to-i)/4410.0)
             val value=when(line.effect){
-                "rain" -> (noise*0.022).toInt()
-                "torch" -> (noise*0.010*(0.45+0.55*kotlin.math.sin(t*12.0)*kotlin.math.sin(t*12.0))).toInt()
-                "fog" -> (noise*0.006).toInt()
-                "glow" -> (kotlin.math.sin(2.0*Math.PI*550.0*t)*550.0*kotlin.math.exp(-t*1.2)).toInt()
+                "rain" -> (noise*0.011).toInt()
+                "torch" -> (noise*0.006*(0.45+0.55*kotlin.math.sin(t*12.0)*kotlin.math.sin(t*12.0))).toInt()
+                "fog" -> (noise*0.003).toInt()
+                "glow" -> (kotlin.math.sin(2.0*Math.PI*550.0*t)*300.0*kotlin.math.exp(-t*1.2)).toInt()
                 else -> 0
             }
             out[i]=clamp(out[i].toInt()+(value*envelope).toInt())

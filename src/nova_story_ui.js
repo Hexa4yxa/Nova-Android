@@ -296,18 +296,23 @@ function render(api) {
       comicProgress.textContent='🎙 Проверяю локальные голоса Android...';
       const speech=await voice.status();
       if(speech?.available){
-       comicProgress.textContent='🎙 NOVA озвучивает историю и собирает звуковой MP4...';
-       const lines=story.scenes.map((scene,index)=>{
-        const text=String(scene.voiceText||scene.beat||'').trim().slice(0,120);
-        const quotation=text.match(/[«"]([^»"]{2,110})[»"]/u);
-        return {
-         text:quotation?quotation[1]:text||('Сцена '+(index+1)),
-         speaker:scene.voiceRole==='character'||quotation?'character':'narrator',
-         startSeconds:index*4,durationSeconds:4,
-         effect:shots[index].effect
-        };
+       const narrator=root.NovaComicNarrator;
+       if(!narrator?.prepare)throw Error('Нет модуля подготовки понятного текста.');
+       if(brain?.status&&brain?.prepare){
+        const ready=await brain.status();
+        if(ready.engine!=='ModelReady')await brain.prepare();
+       }
+       const script=await narrator.prepare(story,speech,brain,message=>{
+        comicProgress.textContent=message;
        });
-       const dubbed=await voice.dubMovie({videoUri:outcome.videoUri,lines});
+       comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
+        ' текст и собирает MP4...';
+       const lines=script.lines.map((line,index)=>({
+        ...line,effect:shots[index].effect
+       }));
+       const dubbed=await voice.dubMovie({
+        videoUri:outcome.videoUri,language:script.language,lines
+       });
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
         voiced=true;
@@ -354,7 +359,10 @@ function render(api) {
    node(storyBox,'p','small',state.motionStatus||'🎞 NOVA создаёт MP4...');
   }
   if(story.movieUri)node(storyBox,'p','small',
-   '✅ MP4 сохранён в Галерею → Фильмы/NOVA ('+(story.movieSeconds||'?')+' сек, без звука).');
+   '✅ Готовый фильм: '+(story.movieSeconds||'?')+' сек · '+
+   (story.movieHasAudio===true?'с озвучкой':
+    story.movieHasAudio===false?'без звука':'наличие звука не указано')+
+   '. Галерея → Фильмы/NOVA.');
   movie.onclick=async()=>{
    if(!canEdit()||!motion?.render||!readyFrames.length)return;
    if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
@@ -377,6 +385,7 @@ function render(api) {
     if(current){
      current.movieUri=outcome.videoUri;
      current.movieSeconds=outcome.seconds;
+     current.movieHasAudio=false;
      if(!director.write(projects)){
       throw Error('MP4 уже сохранён в Фильмы/NOVA, но ссылку не удалось записать в проект.');
      }
@@ -452,6 +461,7 @@ function render(api) {
     if(current){
      current.movieUri=result.videoUri;
      current.movieSeconds=result.seconds;
+     current.movieHasAudio=false;
      if(!director.write(projects))
       throw Error('MP4 уже сохранён в Галерею, но не записался в проект.');
     }
@@ -469,6 +479,22 @@ function render(api) {
     render(api);
    }
   };
+  // Put only the next action in front of the user, not 3 rival renderers.
+  const advanced=node(storyBox,'details','nova-more');
+  node(advanced,'summary','','⚙️ Дополнительные инструменты монтажа');
+  if(comicReady){
+   makeComic.textContent='♻️ Пересобрать комикс-лист';
+   advanced.appendChild(makeComic);
+   if(story.movieUri){
+    comicRow.appendChild(openMovie);
+    readComic.textContent='♻️ Пересоздать фильм с озвучкой';
+    advanced.appendChild(readComic);
+   }
+  }
+  advanced.appendChild(motionRow);
+  advanced.appendChild(storyboardBar);
+  advanced.appendChild(storyboardStatus);
+  advanced.appendChild(storyboardPanel);
   const editRow=node(storyBox,'div','brain-row');
   editRow.style.display='none';
   const nameInput=node(editRow,'input','council-input');
