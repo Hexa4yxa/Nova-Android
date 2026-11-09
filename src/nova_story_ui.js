@@ -296,18 +296,23 @@ function render(api) {
       comicProgress.textContent='🎙 Проверяю локальные голоса Android...';
       const speech=await voice.status();
       if(speech?.available){
-       comicProgress.textContent='🎙 NOVA озвучивает историю и собирает звуковой MP4...';
-       const lines=story.scenes.map((scene,index)=>{
-        const text=String(scene.voiceText||scene.beat||'').trim().slice(0,120);
-        const quotation=text.match(/[«"]([^»"]{2,110})[»"]/u);
-        return {
-         text:quotation?quotation[1]:text||('Сцена '+(index+1)),
-         speaker:scene.voiceRole==='character'||quotation?'character':'narrator',
-         startSeconds:index*4,durationSeconds:4,
-         effect:shots[index].effect
-        };
+       const narrator=root.NovaComicNarrator;
+       if(!narrator?.prepare)throw Error('Нет модуля подготовки понятного текста.');
+       if(brain?.status&&brain?.prepare){
+        const ready=await brain.status();
+        if(ready.engine!=='ModelReady')await brain.prepare();
+       }
+       const script=await narrator.prepare(story,speech,brain,message=>{
+        comicProgress.textContent=message;
        });
-       const dubbed=await voice.dubMovie({videoUri:outcome.videoUri,lines});
+       comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
+        ' текст и собирает MP4...';
+       const lines=script.lines.map((line,index)=>({
+        ...line,effect:shots[index].effect
+       }));
+       const dubbed=await voice.dubMovie({
+        videoUri:outcome.videoUri,language:script.language,lines
+       });
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
         voiced=true;
