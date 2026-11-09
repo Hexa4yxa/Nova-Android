@@ -354,7 +354,10 @@ function render(api) {
    node(storyBox,'p','small',state.motionStatus||'🎞 NOVA создаёт MP4...');
   }
   if(story.movieUri)node(storyBox,'p','small',
-   '✅ MP4 сохранён в Галерею → Фильмы/NOVA ('+(story.movieSeconds||'?')+' сек, без звука).');
+   '✅ Готовый фильм: '+(story.movieSeconds||'?')+' сек · '+
+   (story.movieHasAudio===true?'с озвучкой':
+    story.movieHasAudio===false?'без звука':'наличие звука не указано')+
+   '. Галерея → Фильмы/NOVA.');
   movie.onclick=async()=>{
    if(!canEdit()||!motion?.render||!readyFrames.length)return;
    if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
@@ -377,6 +380,7 @@ function render(api) {
     if(current){
      current.movieUri=outcome.videoUri;
      current.movieSeconds=outcome.seconds;
+     current.movieHasAudio=false;
      if(!director.write(projects)){
       throw Error('MP4 уже сохранён в Фильмы/NOVA, но ссылку не удалось записать в проект.');
      }
@@ -452,6 +456,7 @@ function render(api) {
     if(current){
      current.movieUri=result.videoUri;
      current.movieSeconds=result.seconds;
+     current.movieHasAudio=false;
      if(!director.write(projects))
       throw Error('MP4 уже сохранён в Галерею, но не записался в проект.');
     }
@@ -469,6 +474,22 @@ function render(api) {
     render(api);
    }
   };
+  // Put only the next action in front of the user, not 3 rival renderers.
+  const advanced=node(storyBox,'details','nova-more');
+  node(advanced,'summary','','⚙️ Дополнительные инструменты монтажа');
+  if(comicReady){
+   makeComic.textContent='♻️ Пересобрать комикс-лист';
+   advanced.appendChild(makeComic);
+   if(story.movieUri){
+    comicRow.appendChild(openMovie);
+    readComic.textContent='♻️ Пересоздать фильм с озвучкой';
+    advanced.appendChild(readComic);
+   }
+  }
+  advanced.appendChild(motionRow);
+  advanced.appendChild(storyboardBar);
+  advanced.appendChild(storyboardStatus);
+  advanced.appendChild(storyboardPanel);
   const editRow=node(storyBox,'div','brain-row');
   editRow.style.display='none';
   const nameInput=node(editRow,'input','council-input');
