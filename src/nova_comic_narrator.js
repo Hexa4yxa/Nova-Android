@@ -72,8 +72,13 @@ async function prepare(story,status,brain,onProgress){
   return {text:quoted,role:scene.voiceRole==='character'||quoted!==raw?'character':'narrator'};
  });
  const allReadable=original.every(s=>readable(s.text));
+ const idea=tidy(story.idea||'');
+ const sourceLanguage=UK_MARKERS.test(idea)?'uk':'ru';
+ // Even existing Cyrillic lines must be translated if the only available
+ // local TTS voice speaks the OTHER language.
+ const mustTranslate=!allReadable||sourceLanguage!==lang;
  let generated=null;
- if(!allReadable){
+ if(mustTranslate){
   if(!brain||typeof brain.chat!=='function')
    throw Error('Нужна локальная Gemma для перевода описаний сцен.');
   if(typeof onProgress==='function')
@@ -82,7 +87,7 @@ async function prepare(story,status,brain,onProgress){
   generated=parse(result?.answer,story.scenes.length);
  }
  const lines=original.map((item,i)=>({
-  text:readable(item.text)?item.text:generated[i],
+  text:mustTranslate?generated[i]:item.text,
   speaker:item.role,
   startSeconds:i*4,durationSeconds:4
  }));
