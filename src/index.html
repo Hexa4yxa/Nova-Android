@@ -28,20 +28,24 @@ nav span{cursor:pointer;padding:5px}
 nav .active{color:#999bff;font-weight:bold}
 .panel{background:#20283b;border-radius:15px;padding:18px;margin-bottom:12px}
 .small{color:#a7b1cc;font-size:13px}
+.action-button{font-size:13px;padding:10px 12px;margin:4px;border-radius:12px;background:#343f67;min-height:38px}
+nav{flex-wrap:wrap;gap:4px}nav span{font-size:12px}
+button:disabled{opacity:.5}
+:focus-visible{outline:2px solid #c3c7ff;outline-offset:2px}
 </style>
 </head>
 <body>
 <div class="app">
 <header>
 <div class="brand">✦ NOVA AI</div>
-<div class="subtitle">Твой ИИ-режиссёр · Прототип интерфейса</div>
+<div class="subtitle">Режиссёр, собеседница и творческий партнёр</div><div class="small" id="engine-state" aria-live="polite">Проверяю локальный мозг…</div>
 </header>
 <main id="content"></main>
 <div class="bottom">
 <nav>
 <span class="active" data-tab="chat">💬 Чат</span>
 <span data-tab="projects">🎬 Проекты</span>
-<span data-tab="tools">🧠 Инструменты</span>
+<span data-tab="tools">🛠 Инструменты</span><span data-tab="settings">⚙️ Настройки</span>
 </nav>
 <div class="compose" id="compose">
 <input id="message" placeholder="Напиши задачу NOVA...">
@@ -53,8 +57,23 @@ nav .active{color:#999bff;font-weight:bold}
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
 const input=document.getElementById('message');
+const PERSONALITY = [
+'Ты NOVA, творческий ИИ-режиссёр и собеседница. Отвечай естественно, с юмором, по делу.',
+'Предлагай собственные идеи, но не выдавай придуманные результаты за выполненные действия.',
+'Критик оценивает результат, а не блокирует работу: не более двух переделок, затем лучший доступный результат.',
+'Учитывай ограничения устройства, время и доступные инструменты. Сначала завершай минимально достойный результат.',
+'Объясняй решения, уважай последнее слово пользователя. Девиз: Я режиссёр, я так вижу!',
+'Не заявляй, что управляешь приложениями, выходишь в интернет или создала файлы, пока это не подтверждено инструментом.'
+].join('\\n');
 const welcome={who:'nova',text:'Привет! Я NOVA. Твой локальный ИИ-режиссёр. 🎬'};
 let savedHistory=[];
+const PROJECT_KEY='nova_projects_v1';
+function getProjects(){try{const v=JSON.parse(localStorage.getItem(PROJECT_KEY)||'[]');return Array.isArray(v)?v:[]}catch(e){return []}}
+function saveProject(title){const v=getProjects();v.unshift({title,created:new Date().toISOString(),state:'Идея'});localStorage.setItem(PROJECT_KEY,JSON.stringify(v.slice(0,50)));}
+function addButton(label,handler){const b=document.createElement('button');b.className='action-button';b.textContent=label;b.onclick=handler;return b;}
+function showProjects(){content.replaceChildren();const panel=document.createElement('div');panel.className='panel';panel.textContent='🎬 Проекты и идеи';const items=getProjects();if(!items.length){const p=document.createElement('p');p.className='small';p.textContent='Пока нет сохранённых идей.';panel.appendChild(p);}items.forEach(p=>{const d=document.createElement('p');d.textContent=p.title+' · '+p.state;panel.appendChild(d)});panel.appendChild(addButton('＋ Новая идея',()=>{const name=prompt('Название идеи');if(name?.trim()){saveProject(name.trim());showProjects()}}));content.appendChild(panel);}
+function showSettings(){content.replaceChildren();const p=document.createElement('div');p.className='panel';p.textContent='⚙️ Режим NOVA';const note=document.createElement('p');note.className='small';note.textContent='Сейчас доступен локальный мозг. Интернет и управление другими приложениями не подключены: эти функции нельзя включить одной кнопкой.';p.appendChild(note);p.appendChild(addButton('Проверить мозг',async()=>{try{const b=window.Capacitor?.Plugins?.NovaBrain;if(!b)throw Error('Мост не найден');const st=await b.status();alert('Статус: '+st.engine)}catch(e){alert('Ошибка: '+e.message)}}));content.appendChild(p);}
+
 try{
  const stored=JSON.parse(localStorage.getItem('nova_chat_history') || '[]');
  if(Array.isArray(stored)){
@@ -101,6 +120,7 @@ function showChat(){
   showChat();
  };
 
+ actions.appendChild(addButton('✨ Идея от Новы',()=>{input.value='Нова, предложи одну оригинальную идею короткого ролика, учитывая возможности телефона. Объясни концепцию, 6 кадров, звук и минимально реализуемую анимацию. Пока ничего не запускай.';send();}));
  actions.appendChild(clear);
  content.appendChild(actions);
 
@@ -163,6 +183,8 @@ document.querySelectorAll('nav span').forEach(tab=>{
   const selected=tab.dataset.tab;
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
+  if(selected==='projects')return showProjects();
+  if(selected==='settings')return showSettings();
   content.replaceChildren();
   const panel=document.createElement('div');
   panel.className='panel';
@@ -176,7 +198,7 @@ document.querySelectorAll('nav span').forEach(tab=>{
    panel.textContent='🧠 Инструменты NOVA';
    const note=document.createElement('p');
    note.className='small';
-   note.textContent='Director, Vision, Dual Mind, Critic, Audio — подключение и проверка впереди.';
+   note.textContent='Локальный мозг подключается через NovaBrain. Director, Vision, Dual Mind, Critic и Audio требуют отдельной проверки интеграции. Неактивные инструменты не запускаются.';
    panel.appendChild(note);
   }
   content.appendChild(panel);
@@ -217,12 +239,14 @@ async function novaAutoPrepare() {
   try {
     const status = await brain.status();
 
+    const indicator=document.getElementById('engine-state');
+    if(indicator)indicator.textContent=status.engine==='ModelReady'?'● Локальный мозг готов':'◌ Запуск модели';
     if (status.engine === 'ModelReady') return;
 
     const result = await novaPrepareOnce();
 
     if (result.loaded) {
-      console.log('NOVA: локальная модель готова');
+      console.log('NOVA: локальная модель готова'); const indicator=document.getElementById('engine-state');if(indicator)indicator.textContent='● Локальный мозг готов';
     }
   } catch (error) {
     console.error('NOVA: ошибка запуска модели', error);
