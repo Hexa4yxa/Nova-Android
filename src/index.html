@@ -10,7 +10,7 @@
 body{margin:0;background:#0c101b;color:#f4f5ff;font-family:Arial,sans-serif}
 .app{height:100dvh;display:flex;flex-direction:column;max-width:720px;margin:auto}
 header{padding:calc(22px + env(safe-area-inset-top, 0px)) 18px 22px;background:#151b2b;border-bottom:1px solid #293248}
-.chat-actions{display:flex;justify-content:flex-end;padding:6px 0 12px}
+.chat-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;padding:6px 0 12px}
 .clear-history{background:#30384c;color:#d8def0;font-size:12px;padding:9px 12px;border-radius:10px}
 
 .brand{font-size:23px;font-weight:bold;letter-spacing:2px}
@@ -140,7 +140,7 @@ function getProjects(){try{const v=JSON.parse(localStorage.getItem(PROJECT_KEY)|
 function saveProject(title){const v=getProjects();v.unshift({title,created:new Date().toISOString(),state:'Идея'});localStorage.setItem(PROJECT_KEY,JSON.stringify(v.slice(0,50)));}
 function addButton(label,handler){const b=document.createElement('button');b.className='action-button';b.textContent=label;b.onclick=handler;return b;}
 function showProjects(){content.replaceChildren();const panel=document.createElement('div');panel.className='panel';panel.textContent='🎬 Проекты и идеи';const items=getProjects();if(!items.length){const p=document.createElement('p');p.className='small';p.textContent='Пока нет сохранённых идей.';panel.appendChild(p);}items.forEach(p=>{const d=document.createElement('p');d.textContent=p.title+' · '+p.state;panel.appendChild(d)});panel.appendChild(addButton('＋ Новая идея',()=>{const name=prompt('Название идеи');if(name?.trim()){saveProject(name.trim());showProjects()}}));content.appendChild(panel);}
-function showSettings(){content.replaceChildren();const p=document.createElement('div');p.className='panel';p.textContent='⚙️ Режим NOVA';const note=document.createElement('p');note.className='small';note.textContent='Сейчас доступен локальный мозг. Интернет и управление другими приложениями не подключены: эти функции нельзя включить одной кнопкой.';p.appendChild(note);p.appendChild(addButton('🧠 Память об ошибках ('+getLessons().length+')',showLessons));p.appendChild(addButton('Проверить мозг',async()=>{try{const b=window.Capacitor?.Plugins?.NovaBrain;if(!b)throw Error('Мост не найден');const st=await b.status();alert('Статус: '+st.engine)}catch(e){alert('Ошибка: '+e.message)}}));content.appendChild(p);}
+function showSettings(){content.replaceChildren();const p=document.createElement('div');p.className='panel';p.textContent='⚙️ Режим NOVA';const note=document.createElement('p');note.className='small';note.textContent='Сейчас доступен локальный мозг. Интернет и управление другими приложениями не подключены: эти функции нельзя включить одной кнопкой.';p.appendChild(note);p.appendChild(addButton('🧠 Память об ошибках ('+getLessons().length+')',showLessons));p.appendChild(addButton('🗑 Очистить историю чата',()=>{if(busy)return; if(confirm('Удалить переписку с NOVA?')){history.splice(1);saveHistory();showSettings()}}));p.appendChild(addButton('Проверить мозг',async()=>{try{const b=window.Capacitor?.Plugins?.NovaBrain;if(!b)throw Error('Мост не найден');const st=await b.status();alert('Статус: '+st.engine)}catch(e){alert('Ошибка: '+e.message)}}));content.appendChild(p);}
 
 try{
  const stored=JSON.parse(localStorage.getItem('nova_chat_history') || '[]');
@@ -177,26 +177,15 @@ function showChat(){
  const actions=document.createElement('div');
  actions.className='chat-actions';
 
- const clear=document.createElement('button');
- clear.className='clear-history';
- clear.textContent='🗑 Очистить историю';
- clear.disabled=busy;
- clear.onclick=()=>{
-  if(!confirm('Удалить всю переписку с NOVA?'))return;
-  history.splice(1);
-  saveHistory();
-  showChat();
- };
-
- actions.appendChild(addButton('✨ Идея от Новы',()=>{input.value='Нова, предложи одну оригинальную идею короткого ролика, учитывая возможности телефона. Объясни концепцию, 6 кадров, звук и минимально реализуемую анимацию. Пока ничего не запускай.';send();}));
- actions.appendChild(addButton('📝 Запомнить замечание',()=>{
+ actions.appendChild(addButton('✨ Идея',()=>{input.value='Нова, предложи одну оригинальную идею короткого ролика, учитывая возможности телефона. Объясни концепцию, 6 кадров, звук и минимально реализуемую анимацию. Пока ничего не запускай.';send();}));
+ actions.appendChild(addButton('📝 Замечание',()=>{
  const feedback=prompt('Что Нова должна исправить или учитывать?');
  if(feedback!==null){
   const saved=rememberLesson(feedback);
   if(feedback.trim())alert(saved?'Замечание сохранено.':'Не удалось сохранить замечание.');
  }
 }));
-actions.appendChild(clear);
+
  content.appendChild(actions);
 
  history.forEach(m=>addMessage(m.who,m.text));
