@@ -21,6 +21,8 @@ class NovaCouncilPromptsTest {
             "Зеркало оживает", "кадр за кадром", "не хватает интриги")
         assertTrue(plan.contains("РЕЖИССЁР"))
         assertTrue(criticism.contains("ВНУТРЕННИЙ ГОЛОС"))
+        assertTrue(criticism.contains("не выдумывай недостатки"))
+        assertTrue(criticism.contains("Твоя собственная критика может ошибаться"))
         assertTrue(result.contains("ИСПРАВЛЕННЫЙ ПЛАН"))
         assertTrue(result.contains("не хватает интриги"))
         assertTrue(result.contains("Зеркало оживает"))
