@@ -645,6 +645,14 @@ async function generateNovaIdea(automatic=false){
  // Repeat the guard after awaiting status: a render could have started.
  if(novaIdeaPending||busy||imageBusy||councilState.running)return;
  novaIdeaPending=true;busy=true;
+ let cancelled=false;
+ const stopButton=document.getElementById('stop');
+ stopButton.style.display='inline-block';stopButton.disabled=false;
+ stopButton.onclick=async()=>{
+  if(cancelled)return;
+  cancelled=true;stopButton.disabled=true;
+  try{await brain.cancelChat();}catch(error){console.warn('NOVA: отмена идеи',error);}
+ };
  const waiting={who:'nova',text:'💡 NOVA обдумывает идею для следующего ролика...'};
  history.push(waiting);
  if(!automatic)history.splice(history.length-1,0,{who:'user',text:'Нова, предложи свою идею для следующего ролика'});
@@ -655,11 +663,13 @@ async function generateNovaIdea(automatic=false){
   const requestId='nova-idea-'+Date.now();
   const answer=await brain.chat({message:prompt,requestId});
   const text=String(answer?.answer||'').trim();
+  if(cancelled){waiting.text='Идея остановлена по твоему запросу.';return;}
   if(!text)throw Error('Локальный мозг не предложил идею.');
   waiting.text='💡 Моя идея: '+text.slice(0,1000);
   try{initiative.recordIdea(text);}catch(error){console.warn('NOVA: idea not saved',error);}
  }catch(error){waiting.text='⚠ Не удалось придумать идею: '+(error?.message||String(error));}
  finally{
+  stopButton.style.display='none';stopButton.onclick=null;
   novaIdeaPending=false;busy=false;saveHistory();showChat();
  }
 }
