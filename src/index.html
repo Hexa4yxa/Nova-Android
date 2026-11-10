@@ -670,7 +670,9 @@ async function generateNovaIdea(automatic=false){
  }catch(error){waiting.text='⚠ Не удалось придумать идею: '+(error?.message||String(error));}
  finally{
   stopButton.style.display='none';stopButton.onclick=null;
-  novaIdeaPending=false;busy=false;saveHistory();showChat();
+  novaIdeaPending=false;busy=false;saveHistory();
+  // Finishing a background idea must not replace an open project or tool screen.
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
  }
 }
 function showNovaMore(){
