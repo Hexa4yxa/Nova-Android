@@ -183,6 +183,21 @@ function showChat(){
   const card=document.createElement('div');
   card.className='nova-idea-card';
   card.textContent='💡 Замысел Новы: '+proposed.text;
+  const ratings=document.createElement('div');
+  ratings.className='tool-actions';
+  const previous=window.NovaDirectorInitiative?.lastReaction();
+  for(const [liked,title] of [[true,'👍 Нравится'],[false,'👎 Не моё']]){
+   const vote=document.createElement('button');
+   vote.className='nova-idea-button';
+   vote.textContent=title+(previous?.liked===liked?' ✓':'');
+   vote.disabled=busy;
+   vote.onclick=()=>{
+    try{window.NovaDirectorInitiative.rateIdea(liked);showChat();}
+    catch(error){console.warn('NOVA: не сохранила отзыв',error);}
+   };
+   ratings.appendChild(vote);
+  }
+  card.appendChild(ratings);
   content.appendChild(card);
  }
  history.forEach(m=>addMessage(m.who,m.text,m.preview));
