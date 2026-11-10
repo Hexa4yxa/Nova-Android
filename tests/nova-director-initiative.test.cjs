@@ -48,6 +48,8 @@ test('native personality enforces finished result and truthful tool claims',()=>
  assert.match(engine,/Завершай начатое/);
  assert.match(engine,/Не выдавай намерения за выполненные действия/);
  assert.match(council,/бесконечных доработок/);
+ assert.match(engine,/Не говори её вместо приветствия/);
+ assert.match(council,/Твоя собственная критика может ошибаться/);
 });
 
 
