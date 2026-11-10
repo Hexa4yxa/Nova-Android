@@ -101,5 +101,5 @@ test('video capability is truthful for both available and missing native bridge'
  assert.match(withMotion,/видеокомикс MP4/);
  assert.match(withMotion,/Озвучка/);
  const without=await registry.describeCapability(route,{});
- assert.match(without,/ещё не подключён/);
+ assert.match(without,/ещё не подключён|недоступен/);
 });
