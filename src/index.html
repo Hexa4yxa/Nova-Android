@@ -163,7 +163,7 @@ async function send(){
     }
   }
 
-  const answer=await brain.chat({message:text});
+  const answer=await brain.chat({message:'[Роль NOVA]\\n'+PERSONALITY+'\\n[Запрос пользователя]\\n'+text});
   waiting.text=answer.answer || 'NOVA вернула пустой ответ.';
  }catch(error){
   waiting.text='❌ Ошибка NOVA: '+error.message;
