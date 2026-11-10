@@ -67,7 +67,7 @@ test('generic skills menu and video status are honest',async()=>{
 });
 
 test('NOVA webview includes registry before main script and routes BEFORE Gemma',()=>{
- assert.match(html,/<script src="nova_tool_registry\.js"><\/script>\s*<script src="nova_image_prompt_guard\.js"><\/script>\s*<script src="nova_story_director\.js"><\/script>\s*<script src="nova_comic_narrator\.js"><\/script>\s*<script src="nova_story_ui\.js"><\/script>\s*<script src="nova_story_chat\.js"><\/script>\s*<script>/);
+ assert.match(html,/<script src="nova_tool_registry\.js"><\/script>\s*<script src="nova_image_prompt_guard\.js"><\/script>\s*<script src="nova_story_director\.js"><\/script>\s*<script src="nova_comic_narrator\.js"><\/script>\s*<script src="nova_story_ui\.js"><\/script>\s*<script src="nova_story_chat\.js"><\/script>\s*<script src="nova_director_initiative\.js"><\/script>\s*<script>/);
  assert.doesNotThrow(()=>new vm.Script(inline));
  const capability=inline.indexOf('const capability=window.NovaToolRegistry?.classifyCapability(text,history)');
  const gemma=inline.indexOf('const answer=await brain.chat({message:text,requestId})');
