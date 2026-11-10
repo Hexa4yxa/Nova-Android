@@ -60,10 +60,10 @@ test('generic skills menu and video status are honest',async()=>{
  assert.deepEqual(all,{kind:'capability',tool:'all'});
  const answer=await registry.describeCapability(all,mockReady);
  assert.match(answer,/изображени|PNG|рисов/u);
- assert.match(answer,/видеомонтаж/i);
+ assert.match(answer,/модуль сборки MP4/i);
  const video=registry.classifyCapability('Можешь делать видеомонтаж?',[]);
  assert.equal(video.tool,'video');
- assert.match(await registry.describeCapability(video,mockReady),/ещё не подключён/);
+ assert.match(await registry.describeCapability(video,mockReady),/недоступен/);
 });
 
 test('NOVA webview includes registry before main script and routes BEFORE Gemma',()=>{
@@ -78,4 +78,18 @@ test('NOVA webview includes registry before main script and routes BEFORE Gemma'
  assert.match(inline,/history\.slice\(-6\)/);
  assert.match(inline,/\{kind:'capability',tool:'image'\}/);
 
+});
+
+test('NOVA accurately reports offline voice only when the Android local voice is ready',async()=>{
+ const video={kind:'capability',tool:'video'};
+ const motion={render:async()=>({})};
+ const ready={NovaMotion:motion,NovaVoice:{status:async()=>({available:true}),dubMovie:async()=>({})}};
+ const answer=await registry.describeCapability(video,ready);
+ assert.match(answer,/озвучить через установленный локальный голос Android/);
+ assert.doesNotMatch(answer,/немой|ещё не подключен/);
+ const unavailable={NovaMotion:motion,NovaVoice:{status:async()=>({available:false}),dubMovie:async()=>({})}};
+ const notReady=await registry.describeCapability(video,unavailable);
+ assert.match(notReady,/готовность такого голоса не подтверждена/);
+ const broken={NovaMotion:motion,NovaVoice:{status:async()=>{throw Error('TTS failed')},dubMovie:async()=>({})}};
+ assert.match(await registry.describeCapability(video,broken),/не подтверждена/);
 });
