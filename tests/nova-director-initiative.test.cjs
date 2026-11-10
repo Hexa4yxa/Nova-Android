@@ -49,3 +49,15 @@ test('native personality enforces finished result and truthful tool claims',()=>
  assert.match(engine,/Не выдавай намерения за выполненные действия/);
  assert.match(council,/бесконечных доработок/);
 });
+
+
+test('NOVA remembers the owners explicit idea rating, without changing model weights',()=>{
+ const s=store(),day=new Date('2026-11-10T12:00:00');
+ initiative.recordIdea('Хоррор про отражение',day,s);
+ initiative.rateIdea(false,s);
+ assert.equal(initiative.lastReaction(s).liked,false);
+ assert.match(initiative.prompt([],s),/НЕ ПОНРАВИЛОСЬ: Хоррор про отражение/);
+ initiative.rateIdea(true,s);
+ assert.equal(initiative.lastReaction(s).liked,true);
+ assert.equal(initiative.reactions(s).length,1);
+});
