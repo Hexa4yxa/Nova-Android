@@ -36,7 +36,7 @@ test('simple interface retains real chat, projects, tools, council and brain man
  for(const tab of ['chat','projects','tools','more','council','brains'])
   assert.match(html,new RegExp('data-tab="'+tab+'"'));
  assert.match(html,/async function generateNovaIdea/);
- assert.match(html,/brain\.chat\(\{message:prompt,requestId\}\)/);
+ assert.match(html,/brain\.chat\(\{message:prompt,maxTokens:180,requestId\}\)/);
  assert.match(html,/function showNovaMore/);
  assert.match(html,/function showCouncil/);
  assert.match(html,/function showBrainManager/);
@@ -62,4 +62,15 @@ test('NOVA remembers the owners explicit idea rating, without changing model wei
  initiative.rateIdea(true,s);
  assert.equal(initiative.lastReaction(s).liked,true);
  assert.equal(initiative.reactions(s).length,1);
+});
+
+test('automatic idea is a visible invitation, never an unrequested heavy LLM run',()=>{
+ const html=fs.readFileSync('src/index.html','utf8');
+ assert.match(html,/ideaButton\.onclick=\(\)=>generateNovaIdea\(\)/);
+ assert.match(html,/NOVA обдумывает идею для следующего ролика/);
+ assert.doesNotMatch(html,/generateNovaIdea\(true\)|generateNovaIdea\(false\)/);
+ assert.doesNotMatch(html,/setTimeout\(\(\)=>generateNovaIdea/);
+ assert.doesNotMatch(html,/function generateNovaIdea\(automatic/);
+ assert.match(html,/maxTokens:180,requestId/);
+ assert.match(html,/NovaDirectorInitiative\?\.shouldOffer\(\)/);
 });
