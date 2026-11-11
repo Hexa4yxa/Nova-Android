@@ -38,6 +38,7 @@ function prompt(story, lang, secondsPerScene=4){
   const beat=tidy(scene.beat).slice(0,180);
   const handWritten=tidy(scene.voiceText).slice(0,90);
   return String(i+1)+'. STORY EVENT: '+beat+
+   (scene.voiceRole==='character'?' | SPEAKER: character':'')+
    (handWritten?' | AUTHOR VOICE LINE: '+handWritten:'');
  }).join('\n');
  return [
@@ -86,7 +87,7 @@ async function prepare(story,status,brain,onProgress,secondsPerScene=4){
   const manual=tidy(scene.voiceText);
   const quoted=manual?quote(manual):'';
   return {text:quoted,manual:!!manual,
-   role:manual&&(scene.voiceRole==='character'||quoted!==manual)?'character':'narrator'};
+   role:scene.voiceRole==='character'||(manual&&quoted!==manual)?'character':'narrator'};
  });
  const idea=tidy(story.idea||'');
  const sourceLanguage=UK_MARKERS.test(idea)?'uk':'ru';
