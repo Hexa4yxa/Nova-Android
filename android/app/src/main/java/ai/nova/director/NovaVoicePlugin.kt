@@ -76,7 +76,8 @@ class NovaVoicePlugin : Plugin() {
         (t.voices ?: emptySet()).filter {
             !it.isNetworkConnectionRequired &&
                 (it.locale.language == "uk" || it.locale.language == "ru")
-        }.sortedWith(compareBy<Voice> { if (it.locale.language == "uk") 0 else 1 }
+        }.sortedWith(compareByDescending<Voice> { it.quality }
+            .thenBy { it.latency }
             .thenBy { it.name })
 
     @PluginMethod
@@ -99,6 +100,8 @@ class NovaVoicePlugin : Plugin() {
                             put(JSObject().apply {
                                 put("id", voice.name)
                                 put("language", voice.locale.language)
+                                put("quality", voice.quality)
+                                put("latency", voice.latency)
                             })
                         }
                     })
@@ -114,9 +117,12 @@ class NovaVoicePlugin : Plugin() {
         scope.launch {
             try {
                 val t = availableEngine() ?: error("Офлайн-синтезатор Android недоступен.")
-                val voice = localVoices(t).firstOrNull()
-                    ?: error("Нет установленных локальных голосов. Интернет-голоса запрещены.")
                 val line = (call.getString("text") ?: "Привет! Я Нова, твой офлайн-режиссёр.").take(140)
+                val lang = if (Regex("[ІіЇїЄєҐґ]").containsMatchIn(line)) "uk" else "ru"
+                val voices = localVoices(t)
+                val voice = voices.firstOrNull { it.locale.language == lang }
+                    ?: voices.firstOrNull()
+                    ?: error("Нет установленных локальных голосов. Интернет-голоса запрещены.")
                 check(line.isNotBlank()) { "Нужен текст для озвучивания." }
                 t.voice = voice
                 t.setSpeechRate(0.96f)
@@ -209,8 +215,9 @@ class NovaVoicePlugin : Plugin() {
                     addEnvironment(samples,line,i)
                     val selected=if(line.character)character else narrator
                     t.voice=selected
-                    t.setSpeechRate(if(line.character) 1.0f else 0.97f)
-                    t.setPitch(if(line.character && selected.name==narrator.name) 1.10f else 1.0f)
+                    // Slightly more measured narration, without slowing past the 4-5s window.
+                    t.setSpeechRate(if(line.character) 0.98f else 0.96f)
+                    t.setPitch(if(line.character && selected.name==narrator.name) 1.04f else 1.0f)
                     val wav=File(context.cacheDir,"nova-voice-${UUID.randomUUID()}.wav")
                     try {
                         synthesize(t,line.text,wav)
@@ -318,14 +325,15 @@ class NovaVoicePlugin : Plugin() {
         // Do not quietly cut words in half: the user prefers a safe silent
         // movie to an unintelligible dubbed movie.
         require(actualFrames<=allowed+2205) {
-            "Реплика не помещается в четыре секунды. Сделай фразу короче."
+            "Реплика не помещается в отведённые ${line.duration} секунд. Сделай фразу короче."
         }
         val clipFrames=min(allowed,actualFrames)
         for(i in 0 until clipFrames){
             val source=i.toLong()*wav.rate/44100
             val sourceIndex=source.toInt().coerceIn(0,wav.data.size-1)
+            val softStart=min(1.0,i/1323.0)
             val softEnd=min(1.0,(clipFrames-i)/2205.0)
-            val value=(wav.data[sourceIndex].toInt()*0.85*softEnd).toInt()
+            val value=(wav.data[sourceIndex].toInt()*0.85*softStart*softEnd).toInt()
             // Ambient sound stays in the background while narration speaks.
             out[start+i]=clamp((out[start+i].toInt()*0.24).toInt()+value)
         }
@@ -340,7 +348,7 @@ class NovaVoicePlugin : Plugin() {
             seed=xorShift(seed)
             val noise=(seed and 0xffff)-32768
             val t=(i-from)/44100.0
-            val envelope=min(1.0,(to-i)/4410.0)
+            val envelope=min(1.0,t/0.12)*min(1.0,(to-i)/4410.0)
             val value=when(line.effect){
                 "rain" -> (noise*0.011).toInt()
                 "torch" -> (noise*0.006*(0.45+0.55*kotlin.math.sin(t*12.0)*kotlin.math.sin(t*12.0))).toInt()
