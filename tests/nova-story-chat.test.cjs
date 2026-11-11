@@ -10,7 +10,7 @@ function setup(){
   setItem:(k,v)=>data.set(k,String(v))
  };
  const window={};
- const ctx=vm.createContext({window,localStorage,Date,JSON,Error,Number,String,Array,Object,Math});
+ const ctx=vm.createContext({window,localStorage,Date,JSON,Error,Number,String,Array,Object,Math,setTimeout});
  vm.runInContext(fs.readFileSync('src/nova_story_director.js','utf8'),ctx);
  vm.runInContext(fs.readFileSync('src/nova_story_chat.js','utf8'),ctx);
  return {director:window.NovaStoryDirector,bridge:window.NovaStoryChat,window};
@@ -48,6 +48,10 @@ test('classify combined story/art request before generic chat (Russian/Ukrainian
  assert.equal(bridge.wantsStoryImages('Нарисуй картинку'),false);
  assert.equal(bridge.wantsStoryImages('Привет, как дела?'),false);
  assert.equal(bridge.wantsStoryImages('Напиши историю'),false);
+ assert.equal(bridge.wantsStoryImages('Сама придумай страшную историю, проверь её внутренним голосом, подготовь шесть кадров и предложи, как собрать ролик'),false);
+ assert.equal(bridge.wantsCouncilPlanning('Сама придумай страшную историю, проверь её внутренним голосом, подготовь шесть кадров и предложи, как собрать ролик'),true);
+ assert.equal(bridge.wantsCouncilPlanning('Придумай сюжет и нарисуй картинки'),false);
+
 });
 test('actual native saves: plan -> project -> three renders -> picture references',async()=>{
  const {bridge,director}=setup();
@@ -205,4 +209,50 @@ test('Projects UI offers a visible one-tap resume with stop and native CPU rende
  assert.match(html,/window\.NovaStoryChat\.resumeExisting/);
  assert.match(html,/Прогресс движка/);
  assert.doesNotThrow(()=>new vm.Script(ui));
+});
+
+test('loading conflict: story waits for already-started local model without a second prepare()',async()=>{
+ const {bridge,director}=setup();
+ let calls=0,prepareCount=0;
+ const brain={
+  async status(){calls++;return calls<3?{engine:'Initializing',modelLoading:true}:{engine:'ModelReady',modelLoading:false}},
+  async prepare(){prepareCount++;throw Error('No second concurrent prepare allowed');},
+  chat:fakeBrain().chat
+ };
+ const result=await bridge.run({text:'Придумай историю и нарисуй картинки',
+   brain,generate:async()=>({saved:true,imageUri:'content://media/new'})});
+ assert.equal(result.completed,3);
+ assert.equal(prepareCount,0);
+ assert.ok(calls>=3);
+ assert.equal(director.read().length,1);
+});
+test('initializing without an active loader retries prepare once and reaches ready',async()=>{
+ const {bridge}=setup();
+ let ready=false,prepareCalls=0;
+ const brain={
+  async status(){return {engine:ready?'ModelReady':'Initializing',modelLoading:false}},
+  async prepare(){prepareCalls++;ready=true;}
+ };
+ assert.equal(await bridge.readyBrain(brain),true);
+ assert.equal(prepareCalls,1);
+});
+test('cancel during model startup never writes a new project or renders images',async()=>{
+ const {bridge,director}=setup();
+ let cancelled=true;
+ const res=await bridge.run({text:'Придумай историю и нарисуй картинки',
+  brain:{status:async()=>({engine:'Initializing',modelLoading:true}),
+   prepare:async()=>{throw Error('must not prepare while cancelled')}},
+  isCancelled:()=>cancelled,generate:async()=>{throw Error('must not render');}});
+ assert.equal(res.cancelled,true);
+ assert.equal(director.read().length,0);
+});
+test('combined self-critique sends the user into real Council, not image generator',()=>{
+ const html=fs.readFileSync('src/index.html','utf8');
+ const routestep=html.indexOf('wantsCouncilPlanning(text)');
+ const renderstep=html.indexOf('wantsStoryImages(text)',routestep);
+ assert.ok(routestep>0 && renderstep>routestep);
+ assert.match(html,/await startCouncil\(\)/);
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaBrainPlugin.kt','utf8');
+ assert.match(native,/awaitEngineInitialization/);
+ assert.match(native,/withTimeoutOrNull\(30_000L\)/);
 });
