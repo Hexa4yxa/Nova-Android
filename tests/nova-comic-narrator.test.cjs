@@ -20,7 +20,7 @@ test('English beats become short Russian lines BEFORE the local voice is called'
  assert.deepEqual(out.lines.map(x=>x.text),[
   'Парень пришёл к маяку.','Внутри горел старый факел.','Ангел внезапно проснулся.'
  ]);
- assert.equal(out.lines[2].speaker,'character');
+ assert.equal(out.lines[2].speaker,'narrator'); // No automatic character voices from storyboard metadata.
  assert.ok(out.lines.every(x=>x.durationSeconds===4));
 });
 test('Gemma output in English is rejected, avoiding unintelligible dubbed movie',async()=>{
@@ -146,4 +146,52 @@ test('NOVA project keeps a readable copy of the script used for voice-over',()=>
  assert.match(ui,/current\.narrationDraft=narrationDraft/);
  assert.match(ui,/Сценарий озвучки/);
  assert.match(ui,/NOVA сама напишет связный рассказ/);
+});
+
+
+test('detects captions even when perfectly readable Cyrillic is used',()=>{
+ const s=story(['Тень скользит по стене','Тихое шипение в углу','Взгляд устремился вдаль']);
+ assert.match(narrator.scriptProblem(['Тень скользит по стене.','Шипение в углу.','Взгляд устремился вдаль.'],s),/описаний/);
+ assert.match(narrator.scriptProblem(['На картинке тёмный коридор.'],story(['Дверь открылась'])),/описание изображения/);
+});
+test('Gemma must REWRITE caption-style first output before TTS',async()=>{
+ const s=story(['Тень скользит по стене','Шипение из темноты','Взгляд направился вдаль']);
+ let calls=0;
+ const out=await narrator.prepare(s,ruVoice,{chat:async({message})=>{
+  calls++;
+  if(calls===1)return {answer:JSON.stringify({lines:[
+   'Тень скользит по стене.','Шипение из темноты.','Взгляд направился вдаль.'
+  ]})};
+  assert.match(message,/REWRITE THE WHOLE SCRIPT/);
+  return {answer:JSON.stringify({lines:[
+   'Она поняла, что осталась не одна.',
+   'Кто-то произнёс её забытое имя.',
+   'Но этот голос принадлежал ей самой.'
+  ]})};
+ }});
+ assert.equal(calls,2);
+ assert.match(out.lines[0].text,/поняла/);
+});
+test('unsafe repetitive captions are rejected instead of ruining an MP4 with poor narration',async()=>{
+ const s=story(['Тень скользит по стене','Шипение из темноты','Взгляд направился вдаль']);
+ let calls=0;
+ await assert.rejects(()=>narrator.prepare(s,ruVoice,{chat:async()=>{
+  calls++;
+  return {answer:JSON.stringify({lines:[
+   'Тень скользит по стене.','Шипение из темноты.','Взгляд направился вдаль.'
+  ]})};
+ }}),/отклонила неудачный сценарий/);
+ assert.equal(calls,2);
+});
+test('legacy stored voiceText equal to the scene beat is NOT treated as authored dialogue',async()=>{
+ const s=story(['Тень скользит по стене','В комнате тишина','Дверь закрыта']);
+ s.scenes.forEach(x=>{x.voiceText=x.beat;});
+ let calls=0;
+ const out=await narrator.prepare(s,ruVoice,{chat:async()=>{calls++;return{answer:JSON.stringify({lines:[
+  'Он наконец услышал чужие шаги.',
+  'Но его преследователь уже исчез.',
+  'Тогда он понял, что заперт.'
+ ]})};}});
+ assert.equal(calls,1);
+ assert.equal(out.lines[0].text,'Он наконец услышал чужие шаги.');
 });
