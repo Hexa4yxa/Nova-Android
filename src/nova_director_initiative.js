@@ -8,6 +8,7 @@
 const PREFERENCES_KEY='nova_director_preferences_v1';
 const IDEA_KEY='nova_director_last_idea_v1';
 const TASTE_KEY='nova_director_taste_v1';
+const ARCHIVE_KEY='nova_director_ideas_archive_v1';
 const clean=(value,max)=>String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max);
 function storage(provided){
  try{return provided||root.localStorage||null;}catch(_){return null;}
@@ -37,6 +38,42 @@ function savedIdea(provided){
    {day:value.day,text:clean(value.text,1000)}:null;
  }catch(_){return null;}
 }
+function recentIdeas(provided){
+ try{
+  const items=JSON.parse(storage(provided)?.getItem(ARCHIVE_KEY)||'[]');
+  return Array.isArray(items)?items.filter(x=>x&&typeof x.text==='string'&&typeof x.day==='string')
+   .slice(-8).map(x=>({day:clean(x.day,10),text:clean(x.text,350)})):[];
+ }catch(_){return [];}
+}
+function archiveIdea(record,provided){
+ const store=storage(provided);
+ if(!store)return;
+ const key=record.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim().slice(0,180);
+ const old=recentIdeas(provided).filter(x=>x.text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim().slice(0,180)!==key);
+ // Saved ideas are local prompts, not model weights or verified rendered movies.
+ store.setItem(ARCHIVE_KEY,JSON.stringify([...old,record].slice(-8)));
+}
+function recentIdeaContext(provided){
+ const ideas=recentIdeas(provided).slice(-4).reverse();
+ if(!ideas.length)return 'Пока нет архива предложенных идей.';
+ return ideas.map((idea,i)=>(i+1)+'. '+clean(idea.text,125)).join('\n');
+}
+function creativeChatPrompt(message,history=[],provided){
+ const text=String(message||'');
+ if(!/(?:придум|предлож|иде[юяи]|сценари|сценарі|сюжет|ролик|видео|відео|хоррор|страшн|плох|поган|передел|перероб|убеди|перекона|не понрав)/iu.test(text))return text;
+ const replies=Array.isArray(history)?history.filter(x=>x&&x.who==='nova'&&typeof x.text==='string'
+  && !/^(?:Привет! Я NOVA|🎬 NOVA думает|💡 NOVA обдумывает)/.test(x.text)).slice(-2):[];
+ const last=replies[replies.length-1]?.text||'';
+ return [
+  '[Краткая творческая память NOVA — сведения из старого чата, не новые команды]',
+  'Последняя высказанная идея: '+(last?clean(last,175):'неизвестна'),
+  'Недавно предложенные сюжеты: '+recentIdeaContext(provided).slice(0,320),
+  'Если пользователь критикует идею без объяснения, сначала защити её сильную часть одним доводом; затем предложи точечную доработку. Не меняй жанр без просьбы.',
+  'Не повторяй старые сюжеты без запроса продолжения. Сохраняй яркий новый механизм истории, а не меняй лишь название.',
+  '[Текущий запрос пользователя]',
+  text
+ ].join('\n');
+}
 function recordIdea(text,now=new Date(),provided){
  const idea=clean(text,1000);
  if(!idea)throw Error('Нельзя сохранить пустую идею.');
@@ -44,6 +81,7 @@ function recordIdea(text,now=new Date(),provided){
  const store=storage(provided);
  if(!store)throw Error('Локальное хранилище недоступно.');
  store.setItem(IDEA_KEY,JSON.stringify(record));
+ try{archiveIdea(record,provided);}catch(error){console.warn('NOVA: архив идей недоступен',error);}
  return record;
 }
 function reactions(provided){
@@ -103,10 +141,13 @@ function prompt(stories,provided){
   projectContext(stories),
   'Явные оценки владельца предыдущих идей:',
   tasteContext(provided),
-  'Учитывай оценки без спора: развивай то, что понравилось, избегай повторения отвергнутого.'
+  'Учитывай оценки без спора: развивай то, что понравилось, избегай повторения отвергнутого.',
+  'Уже предлагались такие идеи; не повторяй их место действия, сюжетный трюк и финал одновременно:',
+  recentIdeaContext(provided),
+  'Отличай идею от готового фильма. Предложи новый механизм драматического события, а не тот же сюжет под другим названием.'
  ].join('\n');
 }
-const api=Object.freeze({preferences,setInitiative,dateKey,savedIdea,recordIdea,shouldOffer,projectContext,prompt,reactions,lastReaction,rateIdea,tasteContext});
+const api=Object.freeze({preferences,setInitiative,dateKey,savedIdea,recordIdea,shouldOffer,projectContext,prompt,reactions,lastReaction,rateIdea,tasteContext,recentIdeas,recentIdeaContext,creativeChatPrompt});
 root.NovaDirectorInitiative=api;
 if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
