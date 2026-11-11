@@ -61,7 +61,7 @@ function parse(answer,count){
   throw Error('В тексте озвучки остался английский язык или слишком длинные фразы.');
  return lines;
 }
-async function prepare(story,status,brain,onProgress){
+async function prepare(story,status,brain,onProgress,secondsPerScene=4){
  if(!story||!Array.isArray(story.scenes)||!story.scenes.length||story.scenes.length>6)
   throw Error('Некорректная история для озвучки.');
  if(!status?.available)throw Error('Нет локального голоса Android для озвучки.');
@@ -86,10 +86,11 @@ async function prepare(story,status,brain,onProgress){
   const result=await brain.chat({message:prompt(story,lang),maxTokens:512});
   generated=parse(result?.answer,story.scenes.length);
  }
+ const seconds=secondsPerScene===5?5:4;
  const lines=original.map((item,i)=>({
   text:mustTranslate?generated[i]:item.text,
   speaker:item.role,
-  startSeconds:i*4,durationSeconds:4
+  startSeconds:i*seconds,durationSeconds:seconds
  }));
  if(!lines.every(item=>readable(item.text)))throw Error('Озвучка не прошла языковую проверку.');
  return {language:lang,lines};
