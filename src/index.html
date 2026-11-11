@@ -554,6 +554,8 @@ async function send(){
      const preparedMessage=window.NovaDirectorInitiative?.creativeChatPrompt?.(text,history)||text;
      const answer=await brain.chat({message:preparedMessage,requestId});
     waiting.text=answer.answer || streamed || (stopped?'Ответ остановлен.':'NOVA вернула пустой ответ.');
+     if(!stopped && typeof answer.answer==='string')
+       window.NovaDirectorInitiative?.rememberChatIdea?.(text,answer.answer);
   }finally{
     stopButton.style.display='none';
     stopButton.onclick=null;
