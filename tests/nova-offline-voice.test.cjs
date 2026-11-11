@@ -170,6 +170,34 @@ test('a chosen offline voice is previewed, saved and passed to Android TTS durin
  await x.button('Читать комикс в MP4').onclick();
  assert.equal(x.calls.voice[0].voiceId,'ru-offline-2');
 });
+
+test('per-project offline TTS engine is passed through inspection, preview and final movie export',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ // The test engine advertises an installed neural TTS service.
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/voice\.status\(\{engineId:story\.voiceEngineId\|\|''\}\)/);
+ assert.match(ui,/current\.voiceEngineId=enginePick\.value/);
+ assert.match(ui,/engineId:enginePick\.value/);
+ assert.match(ui,/engineId:story\.voiceEngineId\|\|''/);
+ const p=x.director.read()[0];
+ p.voiceEngineId='dev.ahmedmohamed.hayaitts';
+ x.director.write([p]);
+ x.render();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].engineId,'dev.ahmedmohamed.hayaitts');
+ assert.equal(x.director.read()[0].scenes.length,3);
+});
+test('Android uses installed engines only, waits for preview and shuts down temporary TTS',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/original\.engines\.any \{ it\.name==requested \}/);
+ assert.match(native,/chosen\.currentEngine==requested/);
+ assert.match(native,/chosen\.shutdown\(\)/);
+ assert.match(native,/put\("engines",JSArray\(\)/);
+ assert.match(native,/localVoices\(t\).*filter \{ it\.locale\.language==selectedLanguage \}/);
+ assert.match(native,/withTimeoutOrNull\(30000\)\{completed\.await\(\)\}/);
+});
+
 test('Android TTS accepts only an installed local voice in the selected language',()=>{
  const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(native,/val voiceId=call\.getString\("voiceId"\)/);
