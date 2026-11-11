@@ -121,3 +121,38 @@ test('native contract: physical comic PNG + EGL panel crop + GPU rain/fire/fog',
  assert.match(motion,/fog/);
  assert.match(activity,/registerPlugin\(NovaComicSheetPlugin\.class\)/);
 });
+
+test('one explicit approval runs existing comic and MP4 tools without another tap',async()=>{
+ const x=setup();x.render();
+ const button=x.button('NOVA, сделай ролик');
+ assert.ok(button);
+ assert.equal(button.disabled,false);
+ assert.equal(x.calls.built.length,0);
+ assert.equal(x.calls.rendered.length,0);
+ await button.onclick();
+ // Production chains its next step only after the first stage commits the comic.
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+ const saved=x.director.read()[0];
+ assert.equal(saved.comicPageUri,page);
+ assert.equal(saved.movieUri,'content://media/external/video/media/900');
+ assert.deepEqual(Array.from(saved.scenes.map(s=>s.imageUri)),frames);
+});
+test('one approval reuses completed comic sheet and does not rebuild frames',async()=>{
+ const x=setup();x.render();await x.button('NOVA, создай комикс').onclick();
+ assert.equal(x.calls.built.length,1);
+ await x.button('NOVA, сделай ролик').onclick();
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+});
+test('production does not start when owner declines and preserves all sources',async()=>{
+ const x=setup();x.render();
+ const source=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(source,/if\(!confirm\('NOVA нарисует/);
+ assert.match(source,/state\.autoFinishStoryId=story\.id/);
+ assert.match(source,/readComic\.onclick\(\{skipConfirm:true\}\)/);
+ assert.match(source,/state\.autoFinishStoryId='';\s*state\.error='Комикс:/);
+ assert.equal(x.director.read()[0].movieUri,undefined);
+ assert.equal(x.calls.rendered.length,0);
+});
