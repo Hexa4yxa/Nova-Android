@@ -296,7 +296,7 @@ function render(api) {
   };
   readComic.onclick=async(options={})=>{
    if(!canEdit()||!comicReady||!motion?.render)return;
-   if(!options?.skipConfirm && !confirm('NOVA откроет панели комикса по очереди, добавит движение камеры, дождь, огонь и туман. Если на телефоне есть офлайн-голос, добавит озвучку и звуки в MP4. Создать?'))return;
+   if(!options?.skipConfirm && !confirm('NOVA соберёт ролик из сохранённых кадров, напишет цельный сценарий и добавит чистый офлайн-голос. Без шипения, шумового дождя и автоматических звуков. Создать?'))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    readComic.disabled=true;makeComic.disabled=true;
    comicStop.style.display='';
@@ -350,8 +350,15 @@ function render(api) {
        narrationLanguage=script.language;
        comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
         ' текст и собирает MP4...';
+       // Video visual effects MUST NOT control audio. Most old scene prompts
+       // contained "rain"/"storm" in every image, generating harsh hiss in all shots.
+       // Only an explicit per-scene audioEffect is honored, default is dry voice.
+       const allowedSounds=new Set(['rain','torch','fog','glow']);
        const lines=script.lines.map((line,index)=>({
-        ...line,effect:shots[index].effect
+        ...line,
+        effect:story.enableAudioEffects===true&&
+          allowedSounds.has(story.scenes[index]?.audioEffect)?
+          story.scenes[index].audioEffect:'none'
        }));
        const dubbed=await voice.dubMovie({
         videoUri:outcome.videoUri,language:script.language,lines
@@ -359,8 +366,7 @@ function render(api) {
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
         voiced=true;
-        soundNote='С озвучкой и звуками · '+(dubbed.distinctCharacterVoice?
-         'найдены разные голоса':'доступен один локальный голос');
+        soundNote='Чистая офлайн-озвучка без автоматического шума · голос '+(dubbed.voice||'Android');
        } else soundNote='Звук не подтверждён, сохранено немое видео.';
       }else soundNote=speech?.detail||soundNote;
      }catch(e){
@@ -417,11 +423,25 @@ function render(api) {
   if(Array.isArray(story.narrationDraft)&&story.narrationDraft.length){
    const narrationBox=node(storyBox,'details','nova-more');
    node(narrationBox,'summary','','🎙 Сценарий озвучки · '+story.narrationDraft.length+' реплик');
-   node(narrationBox,'p','small','Это текст, который Нова подготовила для рассказа. Чтобы изменить конкретную реплику, открой «Сцены → Озвучка и диалог».');
+   node(narrationBox,'p','small','Текст готового рассказа. Если реплика плохая — её можно заменить в «Сцены → Озвучка и диалог».');
    story.narrationDraft.forEach((line,index)=>{
     node(narrationBox,'p','small',(index+1)+'. '+String(line).slice(0,120));
    });
   }
+  const audioSettings=node(storyBox,'details','nova-more');
+  node(audioSettings,'summary','','🔊 Звук: '+(story.enableAudioEffects?'эффекты по выбору':'чистый голос, без шипения'));
+  node(audioSettings,'p','small','По умолчанию только голос. Эффекты не угадываются по промптам картинок. Экспериментальные звуки можно добавить вручную в каждой сцене.');
+  const enableSounds=node(audioSettings,'button','council-button',
+   story.enableAudioEffects?'🔇 Отключить звуковые эффекты':'🔊 Разрешить выбранные звуки');
+  enableSounds.disabled=!canEdit();
+  enableSounds.onclick=()=>{
+   const items=director.read(),current=items.find(x=>x.id===story.id);
+   if(!current)return;
+   current.enableAudioEffects=!current.enableAudioEffects;
+   if(!director.write(items)){state.error='Не удалось сохранить настройки звука.';}
+   else{state.error='';state.notice='Настройки звука сохранены. Они применятся при следующем экспорте.';}
+   render(api);
+  };
   movie.onclick=async()=>{
    if(!canEdit()||!motion?.render||!readyFrames.length)return;
    if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
@@ -670,6 +690,25 @@ function render(api) {
     if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
     else{state.error='';state.notice=text?'✅ Реплика сцены '+scene.number+' сохранена.':
      '✅ Для сцены '+scene.number+' снова включён автоматический сценарий NOVA.';}
+    render(api);
+   };
+   const soundDetails=node(row,'details','nova-more');
+   node(soundDetails,'summary','','🔈 Необязательный звук сцены');
+   const soundSelect=node(soundDetails,'select','council-input');
+   for(const [value,label] of [['none','Без звука'],['rain','Дождь (эксперимент)'],
+    ['torch','Огонь (эксперимент)'],['fog','Туман (эксперимент)'],['glow','Сияние (эксперимент)']]){
+    const item=node(soundSelect,'option','',label);item.value=value;
+   }
+   soundSelect.value=scene.audioEffect||'none';
+   const saveSound=node(soundDetails,'button','council-button','💾 Сохранить звук сцены');
+   saveSound.disabled=!canEdit();
+   saveSound.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    const target=current?.scenes.find(x=>x.number===scene.number);
+    if(!target)return;
+    target.audioEffect=soundSelect.value;
+    if(!director.write(items))state.error='Не удалось сохранить звук.';
+    else{state.error='';state.notice='Звук сцены сохранён. Включи звуки в настройках проекта, если нужны.';}
     render(api);
    };
    const details=node(row,'details','nova-more');
