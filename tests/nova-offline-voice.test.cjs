@@ -106,12 +106,21 @@ test('user can keep an optional character line without changing storyboard',()=>
  assert.ok(details);
  const input=flatten(x.content).find(n=>n.tagName==='TEXTAREA'&&n.attributes['aria-label']==='Текст озвучки сцены 1');
  assert.ok(input);
+ assert.equal(input.value,''); // Do NOT prefill with an inaccurate scene description.
  input.value='Нам нужно вернуться!';
  const save=x.button('Сохранить реплику');
  save.onclick();
  const after=x.director.read()[0];
  assert.equal(after.scenes[0].voiceText,'Нам нужно вернуться!');
  assert.equal(after.scenes[0].imageUri,imageUris[0]);
+ x.render();
+ const updated=flatten(x.content).find(n=>n.tagName==='TEXTAREA'&&
+  n.attributes['aria-label']==='Текст озвучки сцены 1');
+ assert.equal(updated.value,'Нам нужно вернуться!');
+ updated.value='';
+ x.button('Сохранить реплику').onclick();
+ assert.equal(x.director.read()[0].scenes[0].voiceText,'');
+ assert.equal(x.director.read()[0].scenes[0].imageUri,imageUris[0]);
 });
 
 test('Android native speech is explicitly offline and muxes AAC with untouched H264 video',()=>{
