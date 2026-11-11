@@ -23,5 +23,5 @@ test('downloads require explicit native confirmation rather than model free-text
 
 test('chat and council remain wired alongside tools',()=>{
   assert.match(code,/brain\.directorCouncil\(/);
-  assert.match(code,/brain\.chat\(\{message:text,requestId\}\)/);
+  assert.match(code,/brain\.chat\(\{message:preparedMessage,requestId\}\)/);
 });
