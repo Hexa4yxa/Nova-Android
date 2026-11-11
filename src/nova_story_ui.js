@@ -331,7 +331,7 @@ function render(api) {
     if(voice?.dubMovie&&voice?.status){
      try{
       comicProgress.textContent='🎙 Проверяю локальные голоса Android...';
-      const speech=await voice.status();
+      const speech=await voice.status({engineId:story.voiceEngineId||''});
       if(speech?.available){
        const narrator=root.NovaComicNarrator;
        if(!narrator?.prepare)throw Error('Нет модуля подготовки понятного текста.');
@@ -359,7 +359,8 @@ function render(api) {
           story.scenes[index].audioEffect:'none'
        }));
        const dubbed=await voice.dubMovie({
-        videoUri:outcome.videoUri,language:script.language,voiceId:story.voiceId||'',lines
+        videoUri:outcome.videoUri,language:script.language,
+         engineId:story.voiceEngineId||'',voiceId:story.voiceId||'',lines
        });
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
@@ -434,17 +435,37 @@ function render(api) {
   inspectVoices.disabled=!voice?.status||!canEdit();
   inspectVoices.onclick=async()=>{
    try{
-    const available=await voice.status();
-    state.voiceChoices={...available,storyId:story.id};
+    const available=await voice.status({engineId:story.voiceEngineId||''});
+    state.voiceChoices={...available,storyId:story.id,engineId:story.voiceEngineId||''};
     state.error='';
     state.notice='Движок: '+(available.engine||'Android')+
      ' · локальных голосов: '+Number(available.count||0)+'.';
    }catch(e){state.error='Голоса: '+(e?.message||String(e));}
    render(api);
   };
-  if(state.voiceChoices?.storyId===story.id&&state.voiceChoices.available){
+  if(state.voiceChoices?.storyId===story.id){
    const status=state.voiceChoices;
-   node(audioSettings,'p','small','Движок: '+(status.engine||'Android')+' · '+status.count+' локальных голосов.');
+   node(audioSettings,'p','small','Движок: '+(status.engine||'Android')+' · '+status.count+' локальных ru/uk голосов.');
+   const enginePick=node(audioSettings,'select','council-input');
+   const systemOption=node(enginePick,'option','','Системный голос (как на телефоне)');
+   systemOption.value='';
+   for(const info of status.engines||[]){
+    const entry=node(enginePick,'option','',info.label||info.id);
+    entry.value=info.id;
+   }
+   enginePick.value=status.engineId||'';
+   enginePick.onchange=async()=>{
+    try{
+     const engineId=enginePick.value;
+     const found=await voice.status({engineId});
+     state.voiceChoices={...found,storyId:story.id,engineId};
+     state.error='';
+     state.notice='Проверен движок '+(found.engine||'Android')+' · голосов: '+found.count;
+    }catch(e){state.error='Движок TTS: '+(e?.message||String(e));}
+    render(api);
+   };
+   if(!status.available)
+    node(audioSettings,'p','small','В выбранном движке нет установленных офлайн-голосов на русском или украинском.');
    const voicePick=node(audioSettings,'select','council-input');
    const autoVoice=node(voicePick,'option','','Автоматически — лучший по версии Android');
    autoVoice.value='';
@@ -452,23 +473,25 @@ function render(api) {
     const entry=node(voicePick,'option','',item.id+' ('+item.language+')');
     entry.value=item.id;
    }
-   voicePick.value=story.voiceId||'';
+   voicePick.value=enginePick.value===(story.voiceEngineId||'')?(story.voiceId||''):'';
    const saveVoice=node(audioSettings,'button','council-button','💾 Выбрать голос');
    saveVoice.disabled=!canEdit();
    saveVoice.onclick=()=>{
     const items=director.read(),current=items.find(x=>x.id===story.id);
     if(!current)return;
+    current.voiceEngineId=enginePick.value;
     current.voiceId=voicePick.value;
     if(!director.write(items))state.error='Не получилось сохранить голос.';
     else{state.error='';state.notice='Голос выбран. Применится при следующем MP4.';}
     render(api);
    };
    const listenVoice=node(audioSettings,'button','council-button','▶ Послушать голос');
-   listenVoice.disabled=!voice?.preview;
+   listenVoice.disabled=!voice?.preview||!status.available;
    listenVoice.onclick=async()=>{
     try{
      const result=await voice.preview({
       voiceId:voicePick.value,
+      engineId:enginePick.value,
       text:'В эту ночь она поняла: за дверью кто-то ждёт её ответа.'
      });
      state.notice='Звучит локальный голос: '+(result?.voice||voicePick.value||'Android');
@@ -477,6 +500,12 @@ function render(api) {
     render(api);
    };
   }
+
+  node(audioSettings,'p','small','Более живой офлайн-голос: установи HayaiTTS, загрузи голос ru/uk в его библиотеке, затем выбери HayaiTTS здесь. Менять системный голос телефона не требуется.');
+  const ttsLink=node(audioSettings,'a','brain-caption','HayaiTTS — официальный APK для ARM64');
+  ttsLink.href='https://github.com/HayaiApp/HayaiTTS/releases/download/v2.5.1/hayaitts-arm64-v8a-v2.5.1.apk';
+  ttsLink.target='_blank';
+  ttsLink.rel='noopener noreferrer';
   const enableSounds=node(audioSettings,'button','council-button',
    story.enableAudioEffects?'🔇 Отключить звуковые эффекты':'🔊 Разрешить выбранные звуки');
   enableSounds.disabled=!canEdit();
