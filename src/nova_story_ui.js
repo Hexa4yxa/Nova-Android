@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -9,6 +9,17 @@ function node(parent,tag,cls,copy) {
  if(copy!==undefined)n.textContent=copy;
  parent.appendChild(n);
  return n;
+}
+function prefillCouncil(task,finalPlan) {
+  if(state.creating||state.drawing||state.motionBusy||state.backupBusy)
+    throw Error('Дождись завершения текущей задачи в студии.');
+  const idea=String(task||'').trim().replace(/\s+/g,' ').slice(0,380);
+  if(idea.length<12)throw Error('Не удалось перенести короткую идею.');
+  state.idea=idea;
+  state.councilBrief=String(finalPlan||'').trim().replace(/\s+/g,' ').slice(0,900);
+  state.error='';
+  state.notice='✅ Замысел и решение совета перенесены. Проверь описание и нажми «Придумай 6 сцен». Картинки пока не создаются.';
+  return true;
 }
 function render(api) {
  const {content,brain,generate,resumeStory,isBusy}=api;
@@ -77,7 +88,7 @@ function render(api) {
   state.error='';
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
-   const question=director.ideaRequest(state.idea,3);
+   const question=director.ideaRequest(state.idea,3,state.councilBrief);
    // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
    // No new models and no image generation until the plan is safely saved.
    const status=await brain.status();
@@ -86,13 +97,15 @@ function render(api) {
    const first=director.parse(response?.answer,state.idea);
    feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
    const second=await brain.chat({
-    message:director.continuationRequest(state.idea,first),maxTokens:512
+    message:director.continuationRequest(state.idea,first,state.councilBrief),maxTokens:512
    });
    const story=director.appendContinuation(first,second?.answer);
+    if(state.councilBrief)story.councilPlan=state.councilBrief;
    const saved=director.read();
    saved.push(story);
    if(!director.write(saved))throw Error('Нет места для сохранения плана истории на телефоне.');
    state.notice='✅ NOVA подготовила 6 сцен. Промпты готовы, картинки ещё не запущены.';
+    state.councilBrief='';
   }catch(e){state.error=e?.message||String(e);}
   finally{state.creating=false;render(api);}
  };
@@ -643,5 +656,5 @@ function render(api) {
  }
  filterCards();
 }
-root.NovaStoryUI=Object.freeze({render});
+root.NovaStoryUI=Object.freeze({render,prefillCouncil});
 })(typeof window!=='undefined'?window:globalThis);
