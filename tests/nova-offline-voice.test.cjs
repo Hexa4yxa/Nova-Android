@@ -51,7 +51,15 @@ function setup(voices=true){
  };
  director.write([project]);
  const content=new Element('main');
- const api={content,brain:{},isBusy:()=>false,generate:async()=>{},resumeStory:async()=>{}};
+ const brain={
+  status:async()=>({engine:'ModelReady'}),
+  chat:async()=>({answer:JSON.stringify({lines:[
+   'Шторм заглушал шаги за его спиной.',
+   'В темноте он услышал знакомый голос.',
+   'И понял: это говорил он сам.'
+  ]})})
+ };
+ const api={content,brain,isBusy:()=>false,generate:async()=>{},resumeStory:async()=>{}};
  const render=()=>window.NovaStoryUI.render(api);
  const button=text=>flatten(content).find(n=>n.tagName==='BUTTON'&&n.textContent.includes(text));
  return {director,content,render,button,calls};
@@ -67,12 +75,19 @@ test('NOVA creates voiced MP4 after the existing panel-by-panel motion render',a
  assert.equal(lines.length,3);
  assert.equal(lines[0].speaker,'narrator');
  assert.equal(lines[0].effect,'rain');
- assert.equal(lines[1].speaker,'character');
- assert.equal(lines[1].text,'Кто там?');
+ assert.equal(lines[1].speaker,'narrator');
+ assert.equal(lines[1].text,'В темноте он услышал знакомый голос.');
  assert.equal(lines[2].effect,'torch');
  const story=x.director.read()[0];
  assert.equal(story.movieUri,voicedVideo);
  assert.equal(story.movieHasAudio,true);
+ assert.deepEqual(Array.from(story.narrationDraft),[
+  'Шторм заглушал шаги за его спиной.',
+  'В темноте он услышал знакомый голос.',
+  'И понял: это говорил он сам.'
+ ]);
+ assert.ok(flatten(x.content).some(n=>n.tagName==='SUMMARY'&&
+  n.textContent.includes('Сценарий озвучки')));
  assert.deepEqual(Array.from(story.scenes.map(s=>s.imageUri)),imageUris);
  assert.equal(story.comicPageUri,comicPage);
 });
