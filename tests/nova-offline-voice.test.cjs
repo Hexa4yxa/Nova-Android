@@ -191,7 +191,9 @@ test('per-project offline TTS engine is passed through inspection, preview and f
 test('Android uses installed engines only, waits for preview and shuts down temporary TTS',()=>{
  const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(native,/original\.engines\.any \{ it\.name==requested \}/);
- assert.match(native,/chosen\.currentEngine==requested/);
+ assert.match(native,/TextToSpeech\(context,\{ code ->/);
+ assert.match(native,/check\(initialized\)/);
+ assert.doesNotMatch(native,/currentEngine/);
  assert.match(native,/chosen\.shutdown\(\)/);
  assert.match(native,/put\("engines",JSArray\(\)/);
  assert.match(native,/localVoices\(t\).*filter \{ it\.locale\.language==selectedLanguage \}/);
