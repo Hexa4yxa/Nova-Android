@@ -41,12 +41,51 @@ test('Russian source is translated into Ukrainian if only Ukrainian offline voic
  assert.equal(out.language,'uk');
  assert.equal(out.lines[0].text,'Він підійшов до маяка.');
 });
-test('Short Cyrillic captions are spoken unchanged in matching local voice',async()=>{
+test('Russian planning captions are NOT spoken verbatim: one local Gemma request writes a connected story',async()=>{
  const s=story(['Сильный дождь у маяка','«Кто там?» — спросил герой','Загорелся факел']);
+ s.title='Последний сигнал';
+ s.councilPlan='Мужчина должен выбрать между бегством и поиском друга.';
+ let calls=0,prompt='';
+ const out=await narrator.prepare(s,ruVoice,{chat:async({message,maxTokens})=>{
+  calls++;prompt=message;
+  assert.equal(maxTokens,768);
+  return {answer:JSON.stringify({lines:[
+   'Он услышал зов сквозь шторм.',
+   'Но голос звучал изнутри маяка.',
+   'И вдруг он узнал этот голос.'
+  ]})};
+ }});
+ assert.equal(calls,1);
+ assert.match(prompt,/not an image captioner/);
+ assert.match(prompt,/NOT verified descriptions/);
+ assert.match(prompt,/Последний сигнал/);
+ assert.match(prompt,/Мужчина должен выбрать/);
+ assert.equal(out.lines[0].text,'Он услышал зов сквозь шторм.');
+ assert.equal(out.lines[1].text,'Но голос звучал изнутри маяка.');
+});
+test('Hand-written voice and character dialogue are preserved, others are written by Gemma',async()=>{
+ const s=story(['Сильный дождь','Темнота внутри','Свет вдалеке']);
+ s.scenes[0].voiceText='Я не должен был сюда приходить.';
+ s.scenes[0].voiceRole='character';
+ s.scenes[1].voiceText='«Кто здесь?» — спросил герой';
+ s.scenes[1].voiceRole='character';
+ const out=await narrator.prepare(s,ruVoice,{chat:async()=>({answer:JSON.stringify({lines:[
+  'Он решил остаться навсегда.',
+  'Никто не ответил на его зов.',
+  'За дверью всё внезапно стихло.'
+ ]})})});
+ assert.equal(out.lines[0].text,'Я не должен был сюда приходить.');
+ assert.equal(out.lines[0].speaker,'character');
+ assert.equal(out.lines[1].text,'Кто здесь?');
+ assert.equal(out.lines[2].text,'За дверью всё внезапно стихло.');
+});
+test('All manually written Cyrillic lines can be voiced offline with no LLM',async()=>{
+ const s=story(['Первый план','Второй план','Третий план']);
+ s.scenes[0].voiceText='Всю ночь он слышал шаги.';
+ s.scenes[1].voiceText='Но рядом никого не было.';
+ s.scenes[2].voiceText='И тогда он увидел себя.';
  const out=await narrator.prepare(s,ruVoice,null);
- assert.equal(out.lines[0].text,'Сильный дождь у маяка');
- assert.equal(out.lines[1].speaker,'character');
- assert.equal(out.lines[1].text,'Кто там?');
+ assert.deepEqual(out.lines.map(x=>x.text),s.scenes.map(x=>x.voiceText));
 });
 test('No local voice means no synth request',async()=>{
  await assert.rejects(()=>narrator.prepare(story(),{available:false},null),/Нет локального голоса/);
@@ -69,15 +108,42 @@ test('Native implementation rejects Latin letters and matches voice language bef
  assert.match(kt,/actualFrames<=allowed/);
 });
 
-test('six frames align speech and effects with a thirty-second short',async()=>{
+test('six linked story lines align with thirty-second video and require one script generation',async()=>{
  const six=story([
   'Первый кадр: герой у входа','Второй кадр: шаги',
   'Третий кадр: герой оглянулся','Четвёртый кадр: тень',
   'Пятый кадр: отражение шевелится','Шестой кадр: финал'
  ]);
- const out=await narrator.prepare(six,ruVoice,null,undefined,5);
+ let calls=0;
+ const reply=['Он вошёл, хотя дверь была открыта.',
+  'Его шаги повторил кто-то ещё.',
+  'Он обернулся. Там никого не было.',
+  'Но тень уже стояла рядом.',
+  'Она двигалась раньше него.',
+  'А потом он увидел себя.'];
+ const out=await narrator.prepare(six,ruVoice,{chat:async ({message})=>{
+  calls++;assert.match(message,/SPEAKER: character/);
+  return {answer:JSON.stringify({lines:reply})};
+ }},undefined,5);
+ assert.equal(calls,1);
  assert.equal(out.lines.length,6);
  assert.deepEqual(out.lines.map(x=>x.startSeconds),[0,5,10,15,20,25]);
  assert.ok(out.lines.every(x=>x.durationSeconds===5));
  assert.equal(out.lines[5].startSeconds+out.lines[5].durationSeconds,30);
+});
+test('Android chooses quality-first offline voices and preserves original MP4 if dubbing fails',()=>{
+ const fs=require('node:fs');
+ const kt=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(kt,/compareByDescending<Voice> \{ it\.quality \}/);
+ assert.match(kt,/!it\.isNetworkConnectionRequired/);
+ assert.match(kt,/val voices=localVoices\(t\)\.filter \{ it\.locale\.language==selectedLanguage \}/);
+ assert.match(kt,/val softStart=min\(1\.0,i\/1323\.0\)/);
+ assert.match(kt,/Исходный MP4 и картинки не изменены/);
+});
+test('NOVA project keeps a readable copy of the script used for voice-over',()=>{
+ const fs=require('node:fs');
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/current\.narrationDraft=narrationDraft/);
+ assert.match(ui,/Сценарий озвучки/);
+ assert.match(ui,/NOVA сама напишет связный рассказ/);
 });
