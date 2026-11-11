@@ -88,7 +88,7 @@ test('reader exports clean original images and keeps standalone comic sheet',asy
  assert.deepEqual(Array.from(shots.map(s=>s.imageUri)),frames);
  assert.ok(shots.every(s=>s.panelIndex===undefined));
  assert.ok(shots.every(s=>s.panelCount===undefined));
- assert.deepEqual(Array.from(shots.map(s=>s.effect)),['rain','torch','fog']);
+ assert.deepEqual(Array.from(shots.map(s=>s.effect)),['none','none','none']); // Never infer rain VFX from prompts.
  const saved=x.director.read()[0];
  assert.equal(saved.movieUri,'content://media/external/video/media/900');
  assert.equal(saved.comicPageUri,page);
@@ -181,4 +181,22 @@ test('MP4 uses full vertical viewport and crops to aspect without captions',()=>
  assert.match(framing,/sourceWidth\.toDouble\(\) \/ sourceHeight/);
  assert.match(ui,/imageUri:scene\.imageUri/);
  assert.doesNotMatch(ui,/imageUri:story\.comicPageUri,panelIndex:index/);
+});
+
+
+test('legacy prompts containing rain in every panel do not overlay artificial visual rain',async()=>{
+ const x=setup();const story=x.director.read()[0];
+ story.scenes.forEach(s=>s.prompt+=' heavy rain and storm throughout');
+ x.director.write([story]);x.render();
+ await x.button('NOVA, создай комикс').onclick();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.ok(x.calls.rendered[0].shots.every(shot=>shot.effect==='none'));
+});
+test('video effect is applied only when a specific scene explicitly opts in',async()=>{
+ const x=setup();const story=x.director.read()[0];
+ story.scenes[1].videoEffect='glow';
+ x.director.write([story]);x.render();
+ await x.button('NOVA, создай комикс').onclick();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.deepEqual(Array.from(x.calls.rendered[0].shots.map(s=>s.effect)),['none','glow','none']);
 });
