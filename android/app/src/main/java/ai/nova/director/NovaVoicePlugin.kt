@@ -72,6 +72,33 @@ class NovaVoicePlugin : Plugin() {
         return t
     }
 
+
+    // An installed offline system TTS engine (e.g. HayaiTTS) can be used for
+    // this project WITHOUT changing the user's system-wide default engine.
+    // Only registered Android TTS services are accepted. No cloud synthesis.
+    private suspend fun <T> withSelectedEngine(
+        packageName: String?, action: suspend (TextToSpeech) -> T
+    ): T {
+        val original=availableEngine() ?: error("Системный синтезатор Android недоступен.")
+        val requested=packageName?.trim().orEmpty()
+        if(requested.isEmpty() || requested==original.currentEngine) return action(original)
+        require(requested.length <= 180 && original.engines.any { it.name==requested }) {
+            "Выбранный движок TTS не установлен. Установи офлайн-голос и проверь его в NOVA."
+        }
+        val ready=CompletableDeferred<Boolean>()
+        val chosen=TextToSpeech(context,{ code ->
+            if(!ready.isCompleted)ready.complete(code==TextToSpeech.SUCCESS)
+        },requested)
+        try {
+            val initialized=withTimeoutOrNull(12000){ready.await()} ?: false
+            check(initialized && chosen.currentEngine==requested) {
+                "Офлайн-движок не запустился. Проверь, что модель голоса установлена."
+            }
+            chosen.setOnUtteranceProgressListener(listener)
+            return action(chosen)
+        } finally { chosen.shutdown() }
+    }
+
     private fun localVoices(t: TextToSpeech): List<Voice> =
         (t.voices ?: emptySet()).filter {
             !it.isNetworkConnectionRequired &&
@@ -84,28 +111,36 @@ class NovaVoicePlugin : Plugin() {
     fun status(call: PluginCall) {
         scope.launch {
             try {
-                val t = availableEngine()
-                val voices = if (t != null) localVoices(t) else emptyList()
-                call.resolve(JSObject().apply {
-                    put("available", voices.isNotEmpty())
-                    put("count", voices.size)
-                    put("engine", t?.defaultEngine ?: "")
-                    put("detail", when {
-                        t == null -> "Системный синтезатор Android не ответил."
-                        voices.isEmpty() -> "Нет установленных офлайн-голосов ru/uk. NOVA не будет включать интернет-озвучку."
-                        else -> "Готово: локальные голоса Android, без облака."
+                withSelectedEngine(call.getString("engineId")) { t ->
+                    val voices=localVoices(t)
+                    call.resolve(JSObject().apply {
+                        put("available",voices.isNotEmpty())
+                        put("count",voices.size)
+                        put("engine",t.currentEngine ?: "")
+                        put("systemDefaultEngine",t.defaultEngine ?: "")
+                        put("detail",if(voices.isEmpty())
+                            "В этом движке нет установленных офлайн-голосов ru/uk."
+                            else "Готовы локальные голоса Android. Интернет не нужен.")
+                        put("engines",JSArray().apply {
+                            t.engines.forEach { info ->
+                                put(JSObject().apply {
+                                    put("id",info.name)
+                                    put("label",info.label.toString())
+                                })
+                            }
+                        })
+                        put("voices",JSArray().apply {
+                            voices.forEach { voice ->
+                                put(JSObject().apply {
+                                    put("id",voice.name)
+                                    put("language",voice.locale.language)
+                                    put("quality",voice.quality)
+                                    put("latency",voice.latency)
+                                })
+                            }
+                        })
                     })
-                    put("voices", JSArray().apply {
-                        voices.forEach { voice ->
-                            put(JSObject().apply {
-                                put("id", voice.name)
-                                put("language", voice.locale.language)
-                                put("quality", voice.quality)
-                                put("latency", voice.latency)
-                            })
-                        }
-                    })
-                })
+                }
             } catch (error: Exception) {
                 call.reject("Не удалось проверить офлайн-голоса: " + (error.message ?: "ошибка"))
             }
@@ -116,7 +151,8 @@ class NovaVoicePlugin : Plugin() {
     fun preview(call: PluginCall) {
         scope.launch {
             try {
-                val t = availableEngine() ?: error("Офлайн-синтезатор Android недоступен.")
+                check(!busy.get()) { "Сейчас NOVA озвучивает фильм. Прослушать голос можно после завершения." }
+                withSelectedEngine(call.getString("engineId")) { t ->
                 val line = (call.getString("text") ?: "Привет! Я Нова, твой офлайн-режиссёр.").take(140)
                 val lang = if (Regex("[ІіЇїЄєҐґ]").containsMatchIn(line)) "uk" else "ru"
                 val voices = localVoices(t)
@@ -130,9 +166,19 @@ class NovaVoicePlugin : Plugin() {
                 t.voice = voice
                 t.setSpeechRate(0.96f)
                 t.setPitch(1.0f)
-                val result = t.speak(line, TextToSpeech.QUEUE_FLUSH, Bundle(), "nova-preview-" + UUID.randomUUID())
-                check(result == TextToSpeech.SUCCESS) { "Android не запустил локальную озвучку." }
-                call.resolve(JSObject().apply { put("started", true);put("voice", voice.name) })
+                val id="nova-preview-"+UUID.randomUUID()
+                val completed=CompletableDeferred<Boolean>()
+                utterances[id]=completed
+                val result=t.speak(line,TextToSpeech.QUEUE_FLUSH,Bundle(),id)
+                if(result!=TextToSpeech.SUCCESS)utterances.remove(id)
+                check(result==TextToSpeech.SUCCESS) { "Android не запустил локальную озвучку." }
+                val spoken=withTimeoutOrNull(30000){completed.await()} ?: false
+                utterances.remove(id)
+                check(spoken) { "Не удалось прослушать выбранный офлайн-голос." }
+                call.resolve(JSObject().apply {
+                    put("started",true);put("voice",voice.name);put("engine",t.currentEngine ?: "")
+                })
+                }
             } catch(error: Exception) {
                 call.reject("Проверка голоса: " + (error.message ?: "ошибка"))
             }
@@ -197,7 +243,7 @@ class NovaVoicePlugin : Plugin() {
         scope.launch {
             var resultUri:Uri?=null
             try {
-                val t=availableEngine() ?: error("Офлайн-синтезатор не готов.")
+                withSelectedEngine(call.getString("engineId")) { t ->
                 val voices=localVoices(t).filter { it.locale.language==selectedLanguage }
                 require(voices.isNotEmpty()) {
                     "На устройстве нет локального голоса языка "+selectedLanguage+". Немой MP4 сохранён."
@@ -251,11 +297,12 @@ class NovaVoicePlugin : Plugin() {
                     put("seconds",seconds)
                     put("voicedLines",lines.size)
                     put("voice",narrator.name)
-                    put("engine",t.defaultEngine ?: "")
+                    put("engine",t.currentEngine ?: "")
                     put("language",selectedLanguage)
                     put("distinctCharacterVoice",character.name!=narrator.name)
                     put("audio",true)
                 })
+                }
             } catch (error:Exception) {
                 resultUri?.let { try{context.contentResolver.delete(it,null,null)}catch(_:Exception){} }
                 call.reject("Озвучка не завершена: "+(error.message ?: "ошибка")+
