@@ -702,7 +702,7 @@ class NovaBrainPlugin : Plugin() {
                 ) { token -> emitCouncilToken(requestId, "final", token) }
                 ensureRunning()
 
-                val checks = NovaCouncilPrompts.checkText(finalPlan)
+                val checks = NovaCouncilPrompts.checkText(finalPlan, task)
                 saveCouncil(task, plan, review, finalPlan, checks)
 
                 val response = JSObject()
