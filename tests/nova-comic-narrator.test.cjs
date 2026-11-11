@@ -68,3 +68,16 @@ test('Native implementation rejects Latin letters and matches voice language bef
  assert.match(kt,/out\[start\+i\]\.toInt\(\)\*0\.24/);
  assert.match(kt,/actualFrames<=allowed/);
 });
+
+test('six frames align speech and effects with a thirty-second short',async()=>{
+ const six=story([
+  'Первый кадр: герой у входа','Второй кадр: шаги',
+  'Третий кадр: герой оглянулся','Четвёртый кадр: тень',
+  'Пятый кадр: отражение шевелится','Шестой кадр: финал'
+ ]);
+ const out=await narrator.prepare(six,ruVoice,null,undefined,5);
+ assert.equal(out.lines.length,6);
+ assert.deepEqual(out.lines.map(x=>x.startSeconds),[0,5,10,15,20,25]);
+ assert.ok(out.lines.every(x=>x.durationSeconds===5));
+ assert.equal(out.lines[5].startSeconds+out.lines[5].durationSeconds,30);
+});
