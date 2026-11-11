@@ -1326,6 +1326,21 @@ function showCouncil(){
    box.id='council-'+key;
  }
  if(councilState.last){
+   // The council does NOT render frames. This hands off an editable project brief.
+   const handoff=addCouncilElement(content,'section','panel');
+   addCouncilElement(handoff,'p','small',
+     'Режиссёр одобрил замысел. Передай его в «Проекты»: там Gemma подготовит 6 кадров, а генерацию изображений ты запустишь отдельно.');
+   const toProjects=addCouncilElement(handoff,'button','council-button','🎬 Продолжить в Проектах');
+   toProjects.disabled=councilState.running || busy;
+   toProjects.onclick=()=>{
+     try{
+       window.NovaStoryUI.prefillCouncil(councilState.task,councilState.final);
+       document.querySelector('nav span[data-tab="projects"]')?.click();
+     }catch(error){
+       councilState.error='Не удалось передать идею: '+(error?.message||String(error));
+       showCouncil();
+     }
+   };
    const checkPanel=addCouncilElement(content,'section','panel');
    addCouncilElement(checkPanel,'div','council-heading','🔍 Critic: проверка текстового плана');
    if(Array.isArray(councilState.last.checks)){
