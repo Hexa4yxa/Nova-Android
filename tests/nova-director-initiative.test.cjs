@@ -105,3 +105,15 @@ test('chat creative memory avoids repeats but does not touch greetings or start 
  assert.match(html,/creativeChatPrompt\?\.\(text,history\)/);
  assert.match(html,/brain\.chat\(\{message:preparedMessage,requestId\}\)/);
 });
+
+test('only completed new-idea chat responses enter archive, not criticism or greetings',()=>{
+ const st=store();
+ assert.equal(initiative.rememberChatIdea('Привет','Спасибо за привет!',st),false);
+ assert.equal(initiative.rememberChatIdea('Переделай плохую идею для ролика','Вот новый вариант: зеркало с тенью героя.',st),false);
+ assert.equal(initiative.rememberChatIdea('Придумай новый сюжет','Маяк',st),false);
+ assert.equal(initiative.rememberChatIdea('Придумай страшный сюжет','Герой слышит шаги в пустом вагоне, но на записи камер появляется другой человек.',st),true);
+ assert.equal(initiative.recentIdeas(st).length,1);
+ const html=fs.readFileSync('src/index.html','utf8');
+ assert.match(html,/rememberChatIdea\?\.\(text,answer\.answer\)/);
+ assert.match(html,/if\(!stopped && typeof answer\.answer==='string'\)/);
+});
