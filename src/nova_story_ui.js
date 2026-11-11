@@ -311,7 +311,7 @@ function render(api) {
      else if(/свет|сиян|light|glow|silver/.test(description))effect='glow';
      return {
       imageUri:story.comicPageUri,panelIndex:index,panelCount:story.scenes.length,
-      plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:4,effect
+      plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:story.scenes.length===6?5:4,effect
      };
     });
     const outcome=await motion.render({shots});
@@ -334,7 +334,7 @@ function render(api) {
        }
        const script=await narrator.prepare(story,speech,brain,message=>{
         comicProgress.textContent=message;
-       });
+       },story.scenes.length===6?5:4);
        comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
         ' текст и собирает MP4...';
        const lines=script.lines.map((line,index)=>({
