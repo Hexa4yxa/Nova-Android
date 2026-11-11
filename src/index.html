@@ -1479,9 +1479,14 @@ async function novaPrepareOnce() {
   if (!brain) throw new Error("NovaBrain недоступен");
 
   novaPreparePending = (async () => {
+    // Share the loader with chat, Council, and app startup. An Initializing
+    // engine must finish its current work before another prepare is attempted.
+    if(window.NovaStoryChat?.readyBrain){
+      const loaded=await window.NovaStoryChat.readyBrain(brain);
+      return {loaded};
+    }
     const status = await brain.status();
-    if (status.engine === "ModelReady")
-      return {loaded:true};
+    if (status.engine === "ModelReady")return {loaded:true};
     return await brain.prepare();
   })();
 
