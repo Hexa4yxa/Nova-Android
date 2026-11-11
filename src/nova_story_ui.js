@@ -642,8 +642,9 @@ function render(api) {
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
    node(voiceDetails,'p','small','По умолчанию NOVA сама напишет связный рассказ по всей истории. Здесь можно задать точную реплику или слова героя.');
    const voiceText=node(voiceDetails,'textarea','council-input');
-   voiceText.maxLength=120;
-   voiceText.value=scene.voiceText||scene.beat;
+   voiceText.maxLength=56;
+   voiceText.value=scene.voiceText||'';
+   voiceText.placeholder='Необязательно — NOVA напишет сама';
    voiceText.setAttribute('aria-label','Текст озвучки сцены '+scene.number);
    const voiceRole=node(voiceDetails,'select','council-input');
    const narratorOption=node(voiceRole,'option','','Рассказчик');
@@ -655,8 +656,11 @@ function render(api) {
    saveVoice.disabled=!canEdit();
    saveVoice.onclick=()=>{
     if(!canEdit())return;
-    const text=voiceText.value.trim().slice(0,120);
-    if(!text){state.error='Нужен текст для реплики.';render(api);return;}
+    const text=voiceText.value.trim().slice(0,56);
+    if(text && (!/[А-Яа-яЁёІіЇїЄєҐґ]/u.test(text)||/[A-Za-z]/.test(text)||text.length<5)){
+     state.error='Нужна короткая понятная реплика на русском или украинском (до 56 знаков).';
+     render(api);return;
+    }
     const saved=director.read();
     const current=saved.find(p=>p.id===story.id);
     const shot=current?.scenes.find(s=>s.number===scene.number);
@@ -664,7 +668,8 @@ function render(api) {
     shot.voiceText=text;
     shot.voiceRole=voiceRole.value==='character'?'character':'narrator';
     if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
-    else{state.error='';state.notice='✅ Реплика сцены '+scene.number+' сохранена.';}
+    else{state.error='';state.notice=text?'✅ Реплика сцены '+scene.number+' сохранена.':
+     '✅ Для сцены '+scene.number+' снова включён автоматический сценарий NOVA.';}
     render(api);
    };
    const details=node(row,'details','nova-more');
