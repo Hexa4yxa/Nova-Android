@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:''};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -193,6 +193,22 @@ function render(api) {
   // NOVA does the complete pipeline: missing SD1.5 images (owner-approved),
   // ONE saved physical comic PNG, then an optional panel-by-panel movie.
   // This remains compatible with older 1-3-scene projects and all saved PNGs.
+  // Single deliberate approval, existing resumable comic -> MP4 + voice.
+  const oneFilm=node(commands,'button','council-button','🎬 NOVA, сделай ролик');
+  oneFilm.disabled=!canEdit()||!comic?.build||!motion?.render||
+   (remaining.length>0&&typeof resumeStory!=='function');
+  oneFilm.onclick=async()=>{
+   if(!canEdit()||!comic?.build||!motion?.render)return;
+   const missing=story.scenes.filter(x=>!x.imageUri).length;
+   if(!confirm('NOVA нарисует '+missing+' недостающих кадров, соберёт комикс и MP4 с движением. '+
+    'Если доступен офлайн-голос — добавит озвучку. Один кадр может создаваться десятки минут. '+
+    'Готовые файлы сохраняются. Продолжить?'))return;
+   state.autoFinishStoryId=story.id;
+   if(comicReady){
+    state.autoFinishStoryId='';
+    await readComic.onclick({skipConfirm:true});
+   }else await makeComic.onclick({skipConfirm:true});
+  };
   const comicRow=node(storyBox,'div','brain-row');
   const makeComic=node(comicRow,'button','council-button',
    '📖 NOVA, создай комикс · '+story.scenes.length+' сцен');
@@ -215,7 +231,7 @@ function render(api) {
   const comicProgress=node(storyBox,'p','small','');
   const comicStop=node(comicRow,'button','council-button','■ Остановить');
   comicStop.style.display='none';
-  makeComic.onclick=async()=>{
+  makeComic.onclick=async(options={})=>{
    if(!canEdit()||!comic?.build)return;
    const current=director.read().find(x=>x.id===story.id);
    if(!current)return;
@@ -226,7 +242,7 @@ function render(api) {
     'Готовые кадры повторно не рисуются. Продолжить?':
     'NOVA соберёт один комикс-лист из '+current.scenes.length+
     ' готовых PNG и сохранит в Галерею. Исходные картинки не изменятся. Продолжить?';
-   if(!confirm(warning))return;
+   if(!options?.skipConfirm && !confirm(warning))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    state.error='';makeComic.disabled=true;readComic.disabled=true;
    comicStop.style.display='';
@@ -264,6 +280,7 @@ function render(api) {
     state.notice='✅ NOVA создала один комикс-лист из '+fresh.scenes.length+
      ' панелей. Открой его или запусти чтение в MP4.';
    }catch(e){
+    state.autoFinishStoryId='';
     state.error='Комикс: '+(e?.message||String(e))+
      '. Уже созданные кадры остаются в Галерее и проекте.';
    }finally{
@@ -271,9 +288,9 @@ function render(api) {
     comicStop.style.display='none';render(api);
    }
   };
-  readComic.onclick=async()=>{
+  readComic.onclick=async(options={})=>{
    if(!canEdit()||!comicReady||!motion?.render)return;
-   if(!confirm('NOVA откроет панели комикса по очереди, добавит движение камеры, дождь, огонь и туман. Если на телефоне есть офлайн-голос, добавит озвучку и звуки в MP4. Создать?'))return;
+   if(!options?.skipConfirm && !confirm('NOVA откроет панели комикса по очереди, добавит движение камеры, дождь, огонь и туман. Если на телефоне есть офлайн-голос, добавит озвучку и звуки в MP4. Создать?'))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    readComic.disabled=true;makeComic.disabled=true;
    comicStop.style.display='';
@@ -355,6 +372,12 @@ function render(api) {
     render(api);
    }
   };
+  if(state.autoFinishStoryId===story.id && comicReady && !state.motionBusy){
+   state.autoFinishStoryId='';
+   Promise.resolve().then(()=>readComic.onclick({skipConfirm:true})).catch(e=>{
+    state.error='Монтаж комикса: '+(e?.message||String(e));render(api);
+   });
+  }
   if(comicReady)node(storyBox,'p','small','📖 Единый комикс-лист готов: '+story.comicPanels+
    ' панелей · Pictures/NOVA.');
   const motionRow=node(storyBox,'div','brain-row');
