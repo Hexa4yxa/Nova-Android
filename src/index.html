@@ -442,8 +442,16 @@ async function send(){
  const text=input.value.trim();
  if(!text || busy)return;
 
- // Compound story + illustration requests must use the real native tools,
- // not a Gemma message pretending that a picture was produced.
+ // Self-critique is handled by the actual native three-stage Council.
+ // "Prepare six frames" is a storyboard request, not a render authorization.
+ if(window.NovaStoryChat?.wantsCouncilPlanning(text)){
+  councilState.task=text;
+  input.value='';
+  document.querySelector('nav span[data-tab="council"]')?.click();
+  await startCouncil();
+  return;
+ }
+ // Only explicitly requested story + image rendering uses the native pipeline.
  if(window.NovaStoryChat?.wantsStoryImages(text)){
   await handleStoryImageMessage(text);
   return;
