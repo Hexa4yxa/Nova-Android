@@ -77,3 +77,31 @@ test('automatic idea is a visible invitation, never an unrequested heavy LLM run
  assert.match(html,/maxTokens:180,requestId/);
  assert.match(html,/NovaDirectorInitiative\?\.shouldOffer\(\)/);
 });
+
+test('creative archive tracks eight distinct concepts without overwriting owner projects',()=>{
+ const st=store();
+ for(let i=0;i<11;i++)initiative.recordIdea('Сюжет номер '+i,new Date('2026-11-11'),st);
+ assert.equal(initiative.recentIdeas(st).length,8);
+ assert.match(initiative.recentIdeaContext(st),/Сюжет номер 10/);
+ assert.doesNotMatch(initiative.recentIdeaContext(st),/Сюжет номер 0\b/);
+ initiative.recordIdea('Сюжет номер 10',new Date('2026-11-11'),st);
+ assert.equal(initiative.recentIdeas(st).length,8);
+ assert.equal(initiative.recentIdeas(st).filter(x=>x.text==='Сюжет номер 10').length,1);
+ assert.match(initiative.prompt([],st),/не повторяй их место действия/);
+});
+test('chat creative memory avoids repeats but does not touch greetings or start extra inference',()=>{
+ const st=store();
+ initiative.recordIdea('Маяк под дождём: герой находит компас',new Date('2026-11-11'),st);
+ const memory=[{who:'nova',text:'Последняя задумка: отражение в зеркале смотрит на героя первым.'}];
+ assert.equal(initiative.creativeChatPrompt('Привет, Нова!',memory,st),'Привет, Нова!');
+ const idea=initiative.creativeChatPrompt('Придумай новый страшный ролик',memory,st);
+ assert.match(idea,/Маяк под дождём/);
+ assert.match(idea,/отражение в зеркале/);
+ assert.match(idea,/Не повторяй старые сюжеты/);
+ assert.match(idea,/Придумай новый страшный ролик/);
+ const critique=initiative.creativeChatPrompt('Я считаю, что идея плохая. Убеди меня.',memory,st);
+ assert.match(critique,/защити её сильную часть/);
+ const html=fs.readFileSync('src/index.html','utf8');
+ assert.match(html,/creativeChatPrompt\?\.\(text,history\)/);
+ assert.match(html,/brain\.chat\(\{message:preparedMessage,requestId\}\)/);
+});
