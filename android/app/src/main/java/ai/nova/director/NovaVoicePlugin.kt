@@ -81,7 +81,7 @@ class NovaVoicePlugin : Plugin() {
     ): T {
         val original=availableEngine() ?: error("Системный синтезатор Android недоступен.")
         val requested=packageName?.trim().orEmpty()
-        if(requested.isEmpty() || requested==original.currentEngine) return action(original)
+        if(requested.isEmpty() || requested==original.defaultEngine) return action(original)
         require(requested.length <= 180 && original.engines.any { it.name==requested }) {
             "Выбранный движок TTS не установлен. Установи офлайн-голос и проверь его в NOVA."
         }
@@ -91,7 +91,7 @@ class NovaVoicePlugin : Plugin() {
         },requested)
         try {
             val initialized=withTimeoutOrNull(12000){ready.await()} ?: false
-            check(initialized && chosen.currentEngine==requested) {
+            check(initialized) {
                 "Офлайн-движок не запустился. Проверь, что модель голоса установлена."
             }
             chosen.setOnUtteranceProgressListener(listener)
@@ -116,7 +116,7 @@ class NovaVoicePlugin : Plugin() {
                     call.resolve(JSObject().apply {
                         put("available",voices.isNotEmpty())
                         put("count",voices.size)
-                        put("engine",t.currentEngine ?: "")
+                        put("engine",call.getString("engineId")?.trim()?.takeIf { it.isNotEmpty() } ?: t.defaultEngine ?: "")
                         put("systemDefaultEngine",t.defaultEngine ?: "")
                         put("detail",if(voices.isEmpty())
                             "В этом движке нет установленных офлайн-голосов ru/uk."
@@ -176,7 +176,7 @@ class NovaVoicePlugin : Plugin() {
                 utterances.remove(id)
                 check(spoken) { "Не удалось прослушать выбранный офлайн-голос." }
                 call.resolve(JSObject().apply {
-                    put("started",true);put("voice",voice.name);put("engine",t.currentEngine ?: "")
+                    put("started",true);put("voice",voice.name);put("engine",call.getString("engineId")?.trim()?.takeIf { it.isNotEmpty() } ?: t.defaultEngine ?: "")
                 })
                 }
             } catch(error: Exception) {
@@ -297,7 +297,7 @@ class NovaVoicePlugin : Plugin() {
                     put("seconds",seconds)
                     put("voicedLines",lines.size)
                     put("voice",narrator.name)
-                    put("engine",t.currentEngine ?: "")
+                    put("engine",call.getString("engineId")?.trim()?.takeIf { it.isNotEmpty() } ?: t.defaultEngine ?: "")
                     put("language",selectedLanguage)
                     put("distinctCharacterVoice",character.name!=narrator.name)
                     put("audio",true)
