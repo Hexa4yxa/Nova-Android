@@ -316,7 +316,8 @@ function render(api) {
      else if(/туман|дым|mist|fog|smoke/.test(description))effect='fog';
      else if(/свет|сиян|light|glow|silver/.test(description))effect='glow';
      return {
-      imageUri:story.comicPageUri,panelIndex:index,panelCount:story.scenes.length,
+      // Export original frame without comic titles/captions; gallery comic page stays intact.
+      imageUri:scene.imageUri,
       plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:story.scenes.length===6?5:4,effect
      };
     });
