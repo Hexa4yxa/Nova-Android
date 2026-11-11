@@ -325,6 +325,8 @@ function render(api) {
     if(!outcome?.saved||!outcome.videoUri)throw Error('Android не подтвердил MP4.');
     let finalMovie=outcome.videoUri;
     let voiced=false;
+    let narrationDraft=[];
+    let narrationLanguage='';
     let soundNote='Без озвучки: офлайн-голос Android не найден.';
     // Keep the original silent MP4 as fallback. A failed TTS or AAC step
     // must never erase the already-rendered comic or its source frames.
@@ -344,6 +346,8 @@ function render(api) {
        const script=await narrator.prepare(story,speech,brain,message=>{
         comicProgress.textContent=message;
        },story.scenes.length===6?5:4);
+       narrationDraft=script.lines.map(line=>line.text);
+       narrationLanguage=script.language;
        comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
         ' текст и собирает MP4...';
        const lines=script.lines.map((line,index)=>({
@@ -369,6 +373,8 @@ function render(api) {
      current.movieUri=finalMovie;
      current.movieSeconds=outcome.seconds;
      current.movieHasAudio=voiced;
+     current.narrationDraft=narrationDraft;
+     current.narrationLanguage=narrationLanguage;
      if(!director.write(items))
       throw Error('MP4 сохранён, но ссылка не записалась в проект.');
     }
@@ -408,6 +414,14 @@ function render(api) {
    (story.movieHasAudio===true?'с озвучкой':
     story.movieHasAudio===false?'без звука':'наличие звука не указано')+
    '. Галерея → Фильмы/NOVA.');
+  if(Array.isArray(story.narrationDraft)&&story.narrationDraft.length){
+   const narrationBox=node(storyBox,'details','nova-more');
+   node(narrationBox,'summary','','🎙 Сценарий озвучки · '+story.narrationDraft.length+' реплик');
+   node(narrationBox,'p','small','Это текст, который Нова подготовила для рассказа. Чтобы изменить конкретную реплику, открой «Сцены → Озвучка и диалог».');
+   story.narrationDraft.forEach((line,index)=>{
+    node(narrationBox,'p','small',(index+1)+'. '+String(line).slice(0,120));
+   });
+  }
   movie.onclick=async()=>{
    if(!canEdit()||!motion?.render||!readyFrames.length)return;
    if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
@@ -626,7 +640,7 @@ function render(api) {
    node(row,'p','small',scene.beat);
    const voiceDetails=node(row,'details','nova-more');
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
-   node(voiceDetails,'p','small','По умолчанию NOVA произнесёт описание сцены. Можно заменить его репликой героя.');
+   node(voiceDetails,'p','small','По умолчанию NOVA сама напишет связный рассказ по всей истории. Здесь можно задать точную реплику или слова героя.');
    const voiceText=node(voiceDetails,'textarea','council-input');
    voiceText.maxLength=120;
    voiceText.value=scene.voiceText||scene.beat;
