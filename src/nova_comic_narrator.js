@@ -19,6 +19,32 @@ function quote(value){
  const match=text.match(/[«"]([^»"]{3,90})[»"]/u);
  return match?tidy(match[1]):text;
 }
+
+function words(value){
+ return tidy(value).toLowerCase().replace(/[^а-яёіїєґa-z0-9\s]/gu,' ')
+  .split(/\s+/).filter(w=>w.length>=4)
+  .map(w=>w.slice(0,Math.min(w.length,5)));
+}
+function scriptProblem(lines,story,manualMask=[]){
+ const seen=new Set();let copied=0;let plot=0;
+ for(let i=0;i<lines.length;i++){
+  if(manualMask[i])continue;
+  const line=tidy(lines[i]),normalized=line.toLowerCase();
+  if(/(?:на (?:этой )?(?:картинке|фотографи[ия]|изображени[ие]|кадре)|в кадре|мы видим|камера (?:движ|показ)|на (?:цьому )?кадрі|на малюнку|ми бачимо)/iu.test(normalized))
+   return 'это описание изображения, а не рассказ';
+  if(seen.has(normalized))return 'одинаковые реплики в разных сценах';
+  seen.add(normalized);
+  const spoken=new Set(words(line));
+  const event=new Set(words(story.scenes[i]?.beat));
+  const common=[...spoken].filter(w=>event.has(w)).length;
+  if(event.size>=3&&spoken.size>=3&&common/Math.min(event.size,spoken.size)>=0.75)copied++;
+  if(/(?:^|\W)(?:он|она|они|его|её|ей|ему|я|мне|мой|мы|ты|их|меня|себя|кто|никто|но|вдруг|тогда|почему|понял|услышал|почувствовал|решил|хотел|оказалось|він|вона|вони|його|її|мені|ніхто|раптом|зрозумів|відчув|почув)(?:$|\W)/iu.test(normalized))plot++;
+ }
+ if(copied>0)return 'повторение описаний раскадровки';
+ if(lines.length>=4 && plot<2)return 'нет связного повествования от лица героя или рассказчика';
+ return '';
+}
+
 function language(story, status){
  const available=new Set((Array.isArray(status?.voices)?status.voices:[])
   .map(v=>v?.language).filter(v=>v==='ru'||v==='uk'));
@@ -52,6 +78,9 @@ function prompt(story, lang, secondsPerScene=4){
   'Never start lines with "На картинке", "На кадре", "Мы видим", "В кадре", or "Камера".',
   'Stick to the approved plot, locations, objects and roles. Do not invent new characters or unrelated events.',
   'The text must sound like ONE coherent narrative, not six separate scene summaries.',
+  'BAD CAPTION: «Тень скользит по стене. Шипение. Взгляд вдаль.»',
+  'GOOD NARRATION: «Он понял: кто-то ждёт, когда он обернётся.»',
+  'Do not narrate visual descriptions. Use character motives, fears, decisions, reveals.',
   'If AUTHOR VOICE LINE appears, preserve its meaning and role; author-entered text takes precedence later.',
   'Each line: about 4 to 9 SHORT words, MAXIMUM '+MAX_CHARS+' characters, suitable for speaking in '+(secondsPerScene===5?'5':'4')+' seconds.',
   'Natural punctuation and speech rhythm. No Latin letters, English words, phonetic nonsense, hashtags or stage directions.',
@@ -84,10 +113,12 @@ async function prepare(story,status,brain,onProgress,secondsPerScene=4){
  // Descriptions (scene.beat) are planning notes, NEVER the default voice-over.
  // Only explicitly authored voiceText can be played unchanged.
  const original=story.scenes.map(scene=>{
-  const manual=tidy(scene.voiceText);
+  const raw=tidy(scene.voiceText);
+  // Previous versions could store voiceText equal to the caption; that is not authored speech.
+  const manual=raw&&raw!==tidy(scene.beat)?raw:'';
   const quoted=manual?quote(manual):'';
   return {text:quoted,manual:!!manual,
-   role:scene.voiceRole==='character'||(manual&&quoted!==manual)?'character':'narrator'};
+   role:manual&&(scene.voiceRole==='character'||quoted!==manual)?'character':'narrator'};
  });
  const idea=tidy(story.idea||'');
  const sourceLanguage=UK_MARKERS.test(idea)?'uk':'ru';
@@ -102,8 +133,26 @@ async function prepare(story,status,brain,onProgress,secondsPerScene=4){
    throw Error('Нужна локальная Gemma для написания связного сценария, а не чтения описаний кадров.');
   if(typeof onProgress==='function')
    onProgress('🧠 NOVA пишет цельную историю для '+(lang==='uk'?'украинской':'русской')+' озвучки...');
-  const result=await brain.chat({message:prompt(story,lang,seconds),maxTokens:768});
-  generated=parse(result?.answer,story.scenes.length);
+  const manualMask=original.map(item=>item.manual&&readable(item.text)&&sourceLanguage===lang);
+  let problem='';
+  for(let attempt=0;attempt<2;attempt++){
+   const rewrite=attempt===0?'':[
+    'REWRITE THE WHOLE SCRIPT. Previous attempt rejected: '+problem+'.',
+    'Stop listing objects, shadow movement, sound, weather, camera or gaze.',
+    'Tell the protagonist fears, decisions, discoveries; each line must advance the plot.',
+    'Different story events need different lines; never paraphrase the storyboard word for word.'
+   ].join('\n');
+   const result=await brain.chat({
+    message:prompt(story,lang,seconds)+(rewrite?'\n'+rewrite:''),
+    maxTokens:768
+   });
+   generated=parse(result?.answer,story.scenes.length);
+   problem=scriptProblem(generated,story,manualMask);
+   if(!problem)break;
+   if(typeof onProgress==='function')onProgress('🧠 NOVA исправляет слишком описательный сценарий...');
+  }
+  if(problem)throw Error('NOVA отклонила неудачный сценарий: '+problem+
+   '. Не разрешаю читать подписи к кадрам вместо истории.');
  }
  const lines=original.map((item,i)=>({
   // Never overwrite a valid author-written line in the matching language.
@@ -114,7 +163,7 @@ async function prepare(story,status,brain,onProgress,secondsPerScene=4){
  if(!lines.every(item=>readable(item.text)))throw Error('Озвучка не прошла языковую проверку.');
  return {language:lang,lines};
 }
-root.NovaComicNarrator=Object.freeze({prepare,prompt,parse,language,readable});
+root.NovaComicNarrator=Object.freeze({prepare,prompt,parse,language,readable,scriptProblem});
 if(typeof module==='object'&&module.exports)
- module.exports={prepare,prompt,parse,language,readable};
+ module.exports={prepare,prompt,parse,language,readable,scriptProblem};
 })(typeof window!=='undefined'?window:globalThis);
