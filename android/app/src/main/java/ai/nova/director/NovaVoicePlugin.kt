@@ -120,9 +120,12 @@ class NovaVoicePlugin : Plugin() {
                 val line = (call.getString("text") ?: "Привет! Я Нова, твой офлайн-режиссёр.").take(140)
                 val lang = if (Regex("[ІіЇїЄєҐґ]").containsMatchIn(line)) "uk" else "ru"
                 val voices = localVoices(t)
-                val voice = voices.firstOrNull { it.locale.language == lang }
-                    ?: voices.firstOrNull()
-                    ?: error("Нет установленных локальных голосов. Интернет-голоса запрещены.")
+                val requestedId=call.getString("voiceId")?.trim().orEmpty()
+                val matched=voices.filter { it.locale.language == lang }
+                val voice = matched.firstOrNull { it.name == requestedId }
+                    ?:matched.firstOrNull()
+                    ?:voices.firstOrNull()
+                    ?:error("Нет установленных локальных голосов. Интернет-голоса запрещены.")
                 check(line.isNotBlank()) { "Нужен текст для озвучивания." }
                 t.voice = voice
                 t.setSpeechRate(0.96f)
@@ -199,7 +202,9 @@ class NovaVoicePlugin : Plugin() {
                 require(voices.isNotEmpty()) {
                     "На устройстве нет локального голоса языка "+selectedLanguage+". Немой MP4 сохранён."
                 }
-                val narrator=voices.first()
+                // A requested voice is selected only from installed OFFLINE voices of the target language.
+                val voiceId=call.getString("voiceId")?.trim().orEmpty()
+                val narrator=voices.firstOrNull { it.name==voiceId } ?: voices.first()
                 val character=voices.firstOrNull { it.name!=narrator.name && it.locale.language==narrator.locale.language }
                     ?:voices.firstOrNull { it.name!=narrator.name }
                     ?:narrator
@@ -246,6 +251,7 @@ class NovaVoicePlugin : Plugin() {
                     put("seconds",seconds)
                     put("voicedLines",lines.size)
                     put("voice",narrator.name)
+                    put("engine",t.defaultEngine ?: "")
                     put("language",selectedLanguage)
                     put("distinctCharacterVoice",character.name!=narrator.name)
                     put("audio",true)
