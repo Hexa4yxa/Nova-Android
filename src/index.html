@@ -166,9 +166,9 @@ function showChat(){
 
  const ideaButton=document.createElement('button');
  ideaButton.className='nova-idea-button';
- ideaButton.textContent='💡 Идея от Новы';
+ ideaButton.textContent=window.NovaDirectorInitiative?.shouldOffer()?'💡 Нова предлагает идею':'💡 Идея от Новы';
  ideaButton.disabled=busy||imageBusy;
- ideaButton.onclick=()=>generateNovaIdea(false);
+ ideaButton.onclick=()=>generateNovaIdea();
  actions.appendChild(ideaButton);
  const advanced=document.createElement('details');
  advanced.className='nova-history-details';
@@ -555,7 +555,7 @@ async function send(){
   saveHistory();
   document.getElementById('send').disabled=false;
   showChat();
-  if(!waiting.text.startsWith('❌'))setTimeout(()=>generateNovaIdea(true).catch(console.warn),850);
+  // Do not start unsolicited inference after an ordinary chat reply.
  }
 }
 document.getElementById('send').onclick=send;
@@ -623,23 +623,20 @@ showChat();
 // NOVA can initiate a new idea after the local brain is ready.
 // Never run an online service, start image rendering, or touch other apps.
 let novaIdeaPending=false;
-async function generateNovaIdea(automatic=false){
+async function generateNovaIdea(){
  const initiative=window.NovaDirectorInitiative;
  const brain=window.Capacitor?.Plugins?.NovaBrain;
  if(!initiative||!brain||novaIdeaPending||busy||imageBusy||councilState.running)return;
- if(automatic){
-  if(!initiative.shouldOffer()||document.querySelector('nav span.active')?.dataset.tab!=='chat')return;
- }
  let state;
  try{state=await brain.status();}
- catch(error){if(!automatic)console.warn('NOVA idea model status',error);return;}
+ catch(error){console.warn('NOVA idea model status',error);history.push({who:'nova',text:'Не удалось проверить локальный мозг. Попробуй ещё раз.'});saveHistory();showChat();return;}
  if(state.engine!=='ModelReady'){
-  if(automatic)return; // Never auto-import a huge GGUF or open the file picker.
+  // Explicit tap: manual model preparation is allowed.
   try{await novaPrepareOnce();state=await brain.status();}
   catch(error){history.push({who:'nova',text:'Чтобы предложить идею, сначала подключи локальный мозг в «Ещё → Мозги». '+(error?.message||'')});saveHistory();showChat();return;}
  }
  if(state.engine!=='ModelReady'){
-  if(!automatic){history.push({who:'nova',text:'Локальная модель пока не готова. Проверь «Ещё → Мозги».'});saveHistory();showChat();}
+  history.push({who:'nova',text:'Локальная модель пока не готова. Проверь «Ещё → Мозги».'});saveHistory();showChat();
   return;
  }
  // Repeat the guard after awaiting status: a render could have started.
@@ -655,13 +652,13 @@ async function generateNovaIdea(automatic=false){
  };
  const waiting={who:'nova',text:'💡 NOVA обдумывает идею для следующего ролика...'};
  history.push(waiting);
- if(!automatic)history.splice(history.length-1,0,{who:'user',text:'Нова, предложи свою идею для следующего ролика'});
+ history.splice(history.length-1,0,{who:'user',text:'Нова, предложи свою идею для следующего ролика'});
  showChat();
  try{
   const stories=window.NovaStoryDirector?.read?.()||[];
   const prompt=initiative.prompt(stories);
   const requestId='nova-idea-'+Date.now();
-  const answer=await brain.chat({message:prompt,requestId});
+  const answer=await brain.chat({message:prompt,maxTokens:180,requestId});
   const text=String(answer?.answer||'').trim();
   if(cancelled){waiting.text='Идея остановлена по твоему запросу.';return;}
   if(!text)throw Error('Локальный мозг не предложил идею.');
@@ -706,7 +703,7 @@ function showNovaMore(){
  };
  setting.appendChild(toggle);
  const wording=document.createElement('span');
- wording.textContent='Нова может сама предлагать одну новую идею в день, когда локальный мозг уже запущен.';
+ wording.textContent='Нова предлагает новую идею в чате, но запускает тяжёлую генерацию только по нажатию. Это защищает телефон от зависаний.';
  setting.appendChild(wording);
  panel.appendChild(setting);
  const safety=document.createElement('p');
@@ -1502,8 +1499,7 @@ if (document.readyState === 'loading') {
 } else {
   novaAutoPrepare();
 }
-// No model import, media rendering or network activity on startup.
-setTimeout(()=>generateNovaIdea(true).catch(console.warn),2000);
+// No auto-generated idea on startup. User starts it from the visible idea button.
 
 </script>
 </body>
