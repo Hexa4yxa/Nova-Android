@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:''};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -359,7 +359,7 @@ function render(api) {
           story.scenes[index].audioEffect:'none'
        }));
        const dubbed=await voice.dubMovie({
-        videoUri:outcome.videoUri,language:script.language,lines
+        videoUri:outcome.videoUri,language:script.language,voiceId:story.voiceId||'',lines
        });
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
@@ -429,6 +429,54 @@ function render(api) {
   const audioSettings=node(storyBox,'details','nova-more');
   node(audioSettings,'summary','','🔊 Звук: '+(story.enableAudioEffects?'эффекты по выбору':'чистый голос, без шипения'));
   node(audioSettings,'p','small','По умолчанию только голос. Эффекты не угадываются по промптам картинок. Экспериментальные звуки можно добавить вручную в каждой сцене.');
+
+  const inspectVoices=node(audioSettings,'button','council-button','🎧 Проверить голоса телефона');
+  inspectVoices.disabled=!voice?.status||!canEdit();
+  inspectVoices.onclick=async()=>{
+   try{
+    const available=await voice.status();
+    state.voiceChoices={...available,storyId:story.id};
+    state.error='';
+    state.notice='Движок: '+(available.engine||'Android')+
+     ' · локальных голосов: '+Number(available.count||0)+'.';
+   }catch(e){state.error='Голоса: '+(e?.message||String(e));}
+   render(api);
+  };
+  if(state.voiceChoices?.storyId===story.id&&state.voiceChoices.available){
+   const status=state.voiceChoices;
+   node(audioSettings,'p','small','Движок: '+(status.engine||'Android')+' · '+status.count+' локальных голосов.');
+   const voicePick=node(audioSettings,'select','council-input');
+   const autoVoice=node(voicePick,'option','','Автоматически — лучший по версии Android');
+   autoVoice.value='';
+   for(const item of status.voices||[]){
+    const entry=node(voicePick,'option','',item.id+' ('+item.language+')');
+    entry.value=item.id;
+   }
+   voicePick.value=story.voiceId||'';
+   const saveVoice=node(audioSettings,'button','council-button','💾 Выбрать голос');
+   saveVoice.disabled=!canEdit();
+   saveVoice.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    if(!current)return;
+    current.voiceId=voicePick.value;
+    if(!director.write(items))state.error='Не получилось сохранить голос.';
+    else{state.error='';state.notice='Голос выбран. Применится при следующем MP4.';}
+    render(api);
+   };
+   const listenVoice=node(audioSettings,'button','council-button','▶ Послушать голос');
+   listenVoice.disabled=!voice?.preview;
+   listenVoice.onclick=async()=>{
+    try{
+     const result=await voice.preview({
+      voiceId:voicePick.value,
+      text:'В эту ночь она поняла: за дверью кто-то ждёт её ответа.'
+     });
+     state.notice='Звучит локальный голос: '+(result?.voice||voicePick.value||'Android');
+     state.error='';
+    }catch(e){state.error='Прослушивание: '+(e?.message||String(e));}
+    render(api);
+   };
+  }
   const enableSounds=node(audioSettings,'button','council-button',
    story.enableAudioEffects?'🔇 Отключить звуковые эффекты':'🔊 Разрешить выбранные звуки');
   enableSounds.disabled=!canEdit();
