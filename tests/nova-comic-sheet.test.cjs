@@ -78,16 +78,16 @@ test('NOVA makes ONE comic sheet, preserving the three original project images',
  assert.equal(x.calls.opened[0].pageUri,page);
 });
 
-test('reader uses ONE sheet image for all 3 panels and assigns visual effects',async()=>{
+test('reader exports clean original images and keeps standalone comic sheet',async()=>{
  const x=setup();x.render();await x.button('NOVA, создай комикс').onclick();
  const read=x.button('Читать комикс в MP4');
  assert.equal(read.disabled,false);
  await read.onclick();
  const shots=x.calls.rendered[0].shots;
  assert.equal(shots.length,3);
- assert.deepEqual(Array.from(shots.map(s=>s.imageUri)),[page,page,page]);
- assert.deepEqual(Array.from(shots.map(s=>s.panelIndex)),[0,1,2]);
- assert.deepEqual(Array.from(shots.map(s=>s.panelCount)),[3,3,3]);
+ assert.deepEqual(Array.from(shots.map(s=>s.imageUri)),frames);
+ assert.ok(shots.every(s=>s.panelIndex===undefined));
+ assert.ok(shots.every(s=>s.panelCount===undefined));
  assert.deepEqual(Array.from(shots.map(s=>s.effect)),['rain','torch','fog']);
  const saved=x.director.read()[0];
  assert.equal(saved.movieUri,'content://media/external/video/media/900');
@@ -169,4 +169,16 @@ test('one approved six-panel story produces thirty seconds with no rerenders',as
  assert.ok(shots.every(x=>x.durationSeconds===5));
  assert.equal(shots.reduce((total,shot)=>total+shot.durationSeconds,0),30);
  assert.equal(x.director.read()[0].scenes.length,6);
+});
+
+test('MP4 uses full vertical viewport and crops to aspect without captions',()=>{
+ const motion=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaMotionPlugin.kt','utf8');
+ const framing=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVideoFraming.kt','utf8');
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(motion,/NovaVideoFraming\.cover\(imageWidth,imageHeight,width,height\)/);
+ assert.doesNotMatch(motion,/height \* 0\.70f/);
+ assert.match(motion,/GLES20\.glViewport\(0,0,width,height\)/);
+ assert.match(framing,/sourceWidth\.toDouble\(\) \/ sourceHeight/);
+ assert.match(ui,/imageUri:scene\.imageUri/);
+ assert.doesNotMatch(ui,/imageUri:story\.comicPageUri,panelIndex:index/);
 });
