@@ -91,8 +91,14 @@ function render(api) {
    const question=director.ideaRequest(state.idea,3,state.councilBrief);
    // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
    // No new models and no image generation until the plan is safely saved.
-   const status=await brain.status();
-   if(status.engine!=='ModelReady')await brain.prepare();
+   // Share the asynchronous native loader; do not race "Initializing".
+   if(root.NovaStoryChat?.readyBrain){
+    const ready=await root.NovaStoryChat.readyBrain(brain,message=>{feedback.textContent=message;});
+    if(!ready)throw Error('Запуск модели остановлен.');
+   }else{
+    const status=await brain.status();
+    if(status.engine!=='ModelReady')await brain.prepare();
+   }
    const response=await brain.chat({message:question,maxTokens:512});
    const first=director.parse(response?.answer,state.idea);
    feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
@@ -328,7 +334,9 @@ function render(api) {
       if(speech?.available){
        const narrator=root.NovaComicNarrator;
        if(!narrator?.prepare)throw Error('Нет модуля подготовки понятного текста.');
-       if(brain?.status&&brain?.prepare){
+       if(root.NovaStoryChat?.readyBrain&&brain?.status){
+        await root.NovaStoryChat.readyBrain(brain,message=>{comicProgress.textContent=message;});
+       }else if(brain?.status&&brain?.prepare){
         const ready=await brain.status();
         if(ready.engine!=='ModelReady')await brain.prepare();
        }
