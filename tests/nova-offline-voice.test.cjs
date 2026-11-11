@@ -22,10 +22,11 @@ const voicedVideo='content://media/external/video/media/1001';
 function setup(voices=true){
  const store=new Map();
  const localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))};
- const calls={voice:[],motion:[]};
+ const calls={voice:[],motion:[],previews:[]};
  const nativeVoice={
   status:async()=>({available:voices,count:voices?2:0,voices:voices?[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]:[],detail:voices?'local':'No installed offline voices'}),
-  dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};}
+  dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};},
+  preview:async x=>{calls.previews.push(x);return {started:true,voice:x.voiceId||'ru-offline'};}
  };
  const nativeMotion={
   render:async x=>{calls.motion.push(x);return {saved:true,videoUri:silentVideo,seconds:12};},
@@ -148,4 +149,30 @@ test('Android native speech is explicitly offline and muxes AAC with untouched H
  assert.match(text,/torch/);
  assert.match(text,/fog/);
  assert.match(activity,/registerPlugin\(NovaVoicePlugin\.class\)/);
+});
+
+
+test('a chosen offline voice is previewed, saved and passed to Android TTS during MP4 export',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ const selects=flatten(x.content).filter(n=>n.tagName==='SELECT');
+ const choice=selects.find(n=>n.children.some(option=>option.value==='ru-offline-2'));
+ assert.ok(choice);
+ choice.value='ru-offline-2';
+ await x.button('Послушать голос').onclick();
+ assert.equal(x.calls.previews[0].voiceId,'ru-offline-2');
+ // render created fresh controls; repeat selection to save
+ const savedPicker=flatten(x.content).filter(n=>n.tagName==='SELECT')
+  .find(n=>n.children.some(option=>option.value==='ru-offline-2'));
+ savedPicker.value='ru-offline-2';
+ x.button('Выбрать голос').onclick();
+ assert.equal(x.director.read()[0].voiceId,'ru-offline-2');
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].voiceId,'ru-offline-2');
+});
+test('Android TTS accepts only an installed local voice in the selected language',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/val voiceId=call\.getString\("voiceId"\)/);
+ assert.match(native,/val narrator=voices\.firstOrNull \{ it\.name==voiceId \} \?: voices\.first\(\)/);
+ assert.match(native,/!it\.isNetworkConnectionRequired/);
 });
