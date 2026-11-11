@@ -53,6 +53,16 @@ function archiveIdea(record,provided){
  // Saved ideas are local prompts, not model weights or verified rendered movies.
  store.setItem(ARCHIVE_KEY,JSON.stringify([...old,record].slice(-8)));
 }
+function rememberChatIdea(request,answer,provided){
+ const question=String(request||'').trim();
+ if(!/(?:придум|предлож|сочини|вигад|запропон)/iu.test(question)
+   || !/(?:иде|іде|сюжет|истор|істор|сценари|сценарі|страшн|ролик|видео|відео)/iu.test(question)
+   || /(?:плох|поган|передел|перероб|убеди|перекона|исправ|виправ)/iu.test(question))return false;
+ const idea=clean(answer,350);
+ if(idea.length<25)return false;
+ try{archiveIdea({day:dateKey(),text:idea},provided);return true;}
+ catch(_){return false;}
+}
 function recentIdeaContext(provided){
  const ideas=recentIdeas(provided).slice(-4).reverse();
  if(!ideas.length)return 'Пока нет архива предложенных идей.';
@@ -147,7 +157,7 @@ function prompt(stories,provided){
   'Отличай идею от готового фильма. Предложи новый механизм драматического события, а не тот же сюжет под другим названием.'
  ].join('\n');
 }
-const api=Object.freeze({preferences,setInitiative,dateKey,savedIdea,recordIdea,shouldOffer,projectContext,prompt,reactions,lastReaction,rateIdea,tasteContext,recentIdeas,recentIdeaContext,creativeChatPrompt});
+const api=Object.freeze({preferences,setInitiative,dateKey,savedIdea,recordIdea,shouldOffer,projectContext,prompt,reactions,lastReaction,rateIdea,tasteContext,recentIdeas,recentIdeaContext,creativeChatPrompt,rememberChatIdea});
 root.NovaDirectorInitiative=api;
 if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
