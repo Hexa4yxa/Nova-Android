@@ -549,7 +549,10 @@ async function send(){
     catch(error){console.warn('NOVA: отмена не удалась',error);}
   };
   try{
-    const answer=await brain.chat({message:text,requestId});
+    // Short local memory for creative discussion; ordinary chat stays unchanged.
+     // No additional LLM pass, so there is no costly second inference.
+     const preparedMessage=window.NovaDirectorInitiative?.creativeChatPrompt?.(text,history)||text;
+     const answer=await brain.chat({message:preparedMessage,requestId});
     waiting.text=answer.answer || streamed || (stopped?'Ответ остановлен.':'NOVA вернула пустой ответ.');
   }finally{
     stopButton.style.display='none';
