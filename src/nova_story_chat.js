@@ -9,9 +9,50 @@
   if(typeof text!=='string')return false;
   const story=/(?:истори|історі|сказк|казк|сюжет|сценари|сценарі)/iu.test(text);
   const pictures=/(?:картин|изображени|зображенн|малюн|рисунк|иллюстрац|ілюстрац|кадр)/iu.test(text);
-  const action=/(?:придумай|сочини|напиши|создай|сделай|вигад|створи|зроби|намалюй|нарисуй|сгенерируй)/iu.test(text);
+  // "Подготовь шесть кадров" is a storyboard request, not permission to render.
+  const explicitRender=/(?:нарисуй|намалюй|нарисовать|намалювати|сгенерируй|згенеруй|рисуй|малюй)|(?:создай|сделай|зроби|створи)\s+(?:(?:к\s+ним|для\s+не[её]|мне|сразу|ещ[её]|шість|шесть|6|три|3)\s+){0,4}(?:картин|изображени|зображенн|малюн|рисунк|иллюстрац|ілюстрац|кадр)/iu.test(text);
   const exclusion=/(?:без\s+(?:картин|изображени|зображенн|малюн|рисунк)|не\s+(?:рисуй|создавай|делай|генерируй|малюй|створюй)\s+(?:картин|изображени|зображенн|малюн|рисунк))/iu.test(text);
-  return story&&pictures&&action&&!exclusion;
+  return story&&pictures&&explicitRender&&!exclusion;
+ }
+ // Director Council is a separate native tool. Don't fake independent
+ // criticism in a one-shot chat or launch costly image rendering instead.
+ function wantsCouncilPlanning(text){
+  if(typeof text!=='string')return false;
+  return /(?:внутренн(?:им|ий|его)\s+голос|внутрішн(?:ім|ій)\s+голос|режисс[её]рск(?:ий|им)\s+совет|режисерськ(?:у|ою)\s+рад|\bcritic\b|критик)/iu.test(text)
+    && /(?:истори|історі|сценари|сценарі|сюжет|кадр|ролик|видео|відео)/iu.test(text)
+    && !wantsStoryImages(text);
+ }
+
+ // An initial model can still be Initializing, or its loading task may
+ // already be underway from app startup. Avoid overlapping prepare calls.
+ async function readyBrain(brain,onStatus=()=>{},isCancelled=()=>false){
+  const deadline=Date.now()+90000;
+  let triedPrepare=false;
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,450));
+  while(Date.now()<deadline){
+   if(isCancelled())return false;
+   const state=await brain.status();
+   if(state.engine==='ModelReady')return true;
+   if(state.engine==='Error')throw Error('Локальная модель: '+(state.detail||'ошибка движка'));
+   if(state.modelLoading || state.generating){
+    onStatus('🧠 NOVA ожидает завершения загрузки мозга...');
+    await pause();
+    continue;
+   }
+   if(!triedPrepare){
+    triedPrepare=true;
+    onStatus('🧠 NOVA запускает локальную модель...');
+    try{await brain.prepare();}
+    catch(error){
+     // Another bridge call can win the race after status() is read.
+     if(!/уже загружает|already|пока занят|Initializing/i.test(String(error?.message||error)))throw error;
+    }
+    continue;
+   }
+   onStatus('🧠 Жду готовности локального движка...');
+   await pause();
+  }
+  throw Error('Движок NOVA не стал готов за 90 секунд. Проверь «Ещё → Мозги»; проекты не удалены.');
  }
  function saveScene(director,storyId,sceneNumber,result){
   // Reload current records before changing one: no clearing, slicing or
@@ -35,8 +76,7 @@
   if(isCancelled())return {cancelled:true,completed:0};
   const idea=String(text||'').trim();
   onStatus('🧠 NOVA создаёт раскадровку и промпты...');
-  const state=await brain.status();
-  if(state.engine!=='ModelReady')await brain.prepare();
+  if(!(await readyBrain(brain,onStatus,isCancelled)))return {cancelled:true,completed:0};
   if(isCancelled())return {cancelled:true,completed:0};
   const plan=await brain.chat({message:director.ideaRequest(idea,3),maxTokens:512});
   if(isCancelled())return {cancelled:true,completed:0};
@@ -90,5 +130,5 @@
   onStatus('📂 Продолжаю историю «'+story.title+'» с первого несозданного кадра...');
   return await renderRemaining({director,story,generate,onStatus,onFrame,isCancelled});
  }
- root.NovaStoryChat=Object.freeze({wantsStoryImages,run,resumeExisting});
+ root.NovaStoryChat=Object.freeze({wantsStoryImages,wantsCouncilPlanning,readyBrain,run,resumeExisting});
 })(typeof window!=='undefined'?window:globalThis);
