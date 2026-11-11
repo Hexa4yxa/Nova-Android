@@ -156,3 +156,17 @@ test('production does not start when owner declines and preserves all sources',a
  assert.equal(x.director.read()[0].movieUri,undefined);
  assert.equal(x.calls.rendered.length,0);
 });
+
+test('one approved six-panel story produces thirty seconds with no rerenders',async()=>{
+ const six=[1,2,3,4,5,6].map(i=>'content://media/external/images/media/'+i);
+ const x=setup(six);x.render();
+ await x.button('NOVA, сделай ролик').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+ const shots=x.calls.rendered[0].shots;
+ assert.equal(shots.length,6);
+ assert.ok(shots.every(x=>x.durationSeconds===5));
+ assert.equal(shots.reduce((total,shot)=>total+shot.durationSeconds,0),30);
+ assert.equal(x.director.read()[0].scenes.length,6);
+});
