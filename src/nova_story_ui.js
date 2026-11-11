@@ -309,12 +309,10 @@ function render(api) {
      comicProgress.textContent='🎬 Панель '+Number(progress.done||0)+' из '+story.scenes.length;
     });
     const shots=story.scenes.map((scene,index)=>{
-     const description=(scene.beat+' '+scene.prompt).toLowerCase();
-     let effect='none';
-     if(/дожд|rain|storm/.test(description))effect='rain';
-     else if(/факел|огонь|плам|fire|flame|torch|lantern/.test(description))effect='torch';
-     else if(/туман|дым|mist|fog|smoke/.test(description))effect='fog';
-     else if(/свет|сиян|light|glow|silver/.test(description))effect='glow';
+     // Image PROMPTS are not effects instructions: repeated "rain/storm" used
+     // to trigger synthetic rain overlays on ALL scenes. Default is clean.
+     const allowedEffects=new Set(['rain','torch','fog','glow']);
+     const effect=allowedEffects.has(scene.videoEffect)?scene.videoEffect:'none';
      return {
       // Export original frame without comic titles/captions; gallery comic page stays intact.
       imageUri:scene.imageUri,
@@ -690,6 +688,25 @@ function render(api) {
     if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
     else{state.error='';state.notice=text?'✅ Реплика сцены '+scene.number+' сохранена.':
      '✅ Для сцены '+scene.number+' снова включён автоматический сценарий NOVA.';}
+    render(api);
+   };
+   const vfxDetails=node(row,'details','nova-more');
+   node(vfxDetails,'summary','','🎞 Необязательный визуальный эффект');
+   const vfxSelect=node(vfxDetails,'select','council-input');
+   for(const [value,label] of [['none','Без эффектов'],['rain','Дождь (эксперимент)'],
+    ['torch','Мерцание огня (эксперимент)'],['fog','Туман (эксперимент)'],['glow','Сияние (эксперимент)']]){
+    const item=node(vfxSelect,'option','',label);item.value=value;
+   }
+   vfxSelect.value=scene.videoEffect||'none';
+   const saveVfx=node(vfxDetails,'button','council-button','💾 Сохранить визуальный эффект');
+   saveVfx.disabled=!canEdit();
+   saveVfx.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    const target=current?.scenes.find(x=>x.number===scene.number);
+    if(!target)return;
+    target.videoEffect=vfxSelect.value;
+    if(!director.write(items))state.error='Не удалось сохранить визуальный эффект.';
+    else{state.error='';state.notice='Эффект изображения сохранён для сцены.';}
     render(api);
    };
    const soundDetails=node(row,'details','nova-more');
