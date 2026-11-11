@@ -4,13 +4,14 @@
 'use strict';
 const KEY='nova_story_projects_v1';
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
-function ideaRequest(idea,count=3) {
+function ideaRequest(idea,count=3,councilBrief='') {
  const subject=clean(idea,380);
  if(subject.length<12)throw Error('Опиши идею истории хотя бы одним предложением.');
  const number=Math.max(1,Math.min(3,Number(count)||3));
  return [
   'You are NOVA, a creative film director. Create a cohesive ORIGINAL three-scene storyboard.',
   'Story idea from owner (must preserve it): '+subject,
+  ...(clean(councilBrief,480)?['Approved DIRECTOR COUNCIL outline (guidance for six scenes, not already filmed): '+clean(councilBrief,480)]:[]),
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
   '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
   'Make exactly '+number+' scenes. One single protagonist look across all scenes.',
@@ -69,13 +70,14 @@ function parse(raw,original){return validate(extract(raw),original);}
 /* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
    Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
    This does not change the format of older 1-3 scene stories. */
-function continuationRequest(original,first) {
+function continuationRequest(original,first,councilBrief='') {
  if(!first||!Array.isArray(first.scenes)||first.scenes.length!==3)
   throw Error('Сначала нужно подготовить три начальные сцены.');
  const subject=clean(original,380);
  return [
   'You are NOVA, continuing an ORIGINAL six-scene motion-comic story.',
   'The owner\'s original story: '+subject,
+  ...(clean(councilBrief,300)?['Director Council outline for continuity: '+clean(councilBrief,300)]:[]),
   'The first THREE scenes have ALREADY happened:',
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
