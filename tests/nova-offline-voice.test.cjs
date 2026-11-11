@@ -74,10 +74,10 @@ test('NOVA creates voiced MP4 after the existing panel-by-panel motion render',a
  const lines=x.calls.voice[0].lines;
  assert.equal(lines.length,3);
  assert.equal(lines[0].speaker,'narrator');
- assert.equal(lines[0].effect,'rain');
+ assert.equal(lines[0].effect,'none'); // The visual rain is never converted to hiss.
  assert.equal(lines[1].speaker,'narrator');
  assert.equal(lines[1].text,'В темноте он услышал знакомый голос.');
- assert.equal(lines[2].effect,'torch');
+ assert.equal(lines[2].effect,'none');
  const story=x.director.read()[0];
  assert.equal(story.movieUri,voicedVideo);
  assert.equal(story.movieHasAudio,true);
@@ -92,6 +92,18 @@ test('NOVA creates voiced MP4 after the existing panel-by-panel motion render',a
  assert.equal(story.comicPageUri,comicPage);
 });
 
+test('audio settings default to dry narration and never infer rain from repeated prompt words',async()=>{
+ const x=setup();x.render();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice.length,1);
+ assert.ok(x.calls.voice[0].lines.every(line=>line.effect==='none'));
+ const project=x.director.read()[0];
+ assert.notEqual(project.enableAudioEffects,true);
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/story\.enableAudioEffects===true/);
+ assert.match(ui,/story\.scenes\[index\]\?\.audioEffect/);
+ assert.doesNotMatch(ui,/effect:shots\[index\]\.effect/);
+});
 test('missing offline voice does not remove the finished silent MP4',async()=>{
  const x=setup(false);x.render();
  await x.button('Читать комикс в MP4').onclick();
