@@ -31,6 +31,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.min
@@ -125,9 +126,12 @@ class NovaVoicePlugin : Plugin() {
         Bundle().apply {
             if(isSupertonic(voice)) {
                 require(language == "ru" || language == "uk") { "Нужен язык ru/uk." }
-                putString(TextToSpeech.Engine.KEY_PARAM_LANGUAGE, language)
-                putString(TextToSpeech.Engine.KEY_PARAM_COUNTRY, if(language=="uk") "UA" else "RU")
-                putString(TextToSpeech.Engine.KEY_PARAM_VARIANT, "")
+                // The Android framework uses these internal Bundle keys, but its SDK
+                // hides their constants. SynthesisRequest requires ISO-639-3 /
+                // ISO-3166-3 values even for a multilingual voice.
+                putString("language", if(language=="uk") "ukr" else "rus")
+                putString("country", if(language=="uk") "UKR" else "RUS")
+                putString("variant", "")
             }
         }
 
@@ -139,11 +143,14 @@ class NovaVoicePlugin : Plugin() {
                     val voices=localVoices(t,call.getString("engineId"))
                     call.resolve(JSObject().apply {
                         put("available",voices.isNotEmpty())
+                        put("rawVoiceCount",t.voices?.size ?: 0)
+                        put("ruSupported",t.isLanguageAvailable(Locale("ru","RU")) >= TextToSpeech.LANG_AVAILABLE)
+                        put("ukSupported",t.isLanguageAvailable(Locale("uk","UA")) >= TextToSpeech.LANG_AVAILABLE)
                         put("count",voices.size)
                         put("engine",call.getString("engineId")?.trim()?.takeIf { it.isNotEmpty() } ?: t.defaultEngine ?: "")
                         put("systemDefaultEngine",t.defaultEngine ?: "")
                         put("detail",if(voices.isEmpty())
-                            "В этом движке нет установленных офлайн-голосов ru/uk."
+                            "Android пока не передал NOVA голоса ru/uk. Модель может быть установлена, но TTS-сервис ещё не видит её."
                             else "Готовы локальные голоса Android. Интернет не нужен.")
                         put("engines",JSArray().apply {
                             t.engines.forEach { info ->
