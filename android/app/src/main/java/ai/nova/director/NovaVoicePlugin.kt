@@ -110,14 +110,19 @@ class NovaVoicePlugin : Plugin() {
     private fun isSupertonic(voice: Voice): Boolean =
         voice.name.contains("supertonic", ignoreCase = true)
 
-    private fun localVoices(t: TextToSpeech, engineId: String? = null): List<Voice> =
-        (t.voices ?: emptySet()).filter { voice ->
+    private fun localVoices(t: TextToSpeech, engineId: String? = null): List<Voice> {
+        // A blank engineId means "system default". If HayaiTTS is the
+        // default, its multilingual Supertonic voices must not disappear just
+        // because the caller omitted an explicit engine choice.
+        val effectiveEngineId = engineId?.trim()?.takeIf { it.isNotEmpty() } ?: t.defaultEngine
+        return (t.voices ?: emptySet()).filter { voice ->
             !voice.isNetworkConnectionRequired &&
                 (voice.locale.language == "uk" || voice.locale.language == "ru" ||
-                    (isHayai(engineId) && isSupertonic(voice)))
+                    (isHayai(effectiveEngineId) && isSupertonic(voice)))
         }.sortedWith(compareByDescending<Voice> { it.quality }
             .thenBy { it.latency }
             .thenBy { it.name })
+    }
 
     // The Android framework otherwise forwards Voice.locale (e.g. Arabic)
     // to the multilingual engine. Per-utterance params override that tag
