@@ -247,8 +247,10 @@ test('NOVA overrides framework first-language locale for multi-language Superton
  const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(native,/voice\.name\.contains\("supertonic", ignoreCase = true\)/);
  assert.match(native,/isHayai\(engineId\) && isSupertonic\(voice\)/);
- assert.match(native,/putString\(TextToSpeech\.Engine\.KEY_PARAM_LANGUAGE, language\)/);
- assert.match(native,/putString\(TextToSpeech\.Engine\.KEY_PARAM_COUNTRY, if\(language=="uk"\)/);
+ assert.match(native,/putString\("language", if\(language=="uk"\) "ukr" else "rus"\)/);
+ assert.match(native,/putString\("country", if\(language=="uk"\) "UKR" else "RUS"\)/);
  assert.match(native,/t\.speak\(line,TextToSpeech\.QUEUE_FLUSH,voiceParams\(voice,lang\),id\)/);
  assert.match(native,/synthesizeToFile\(text,voiceParams\(voice,language\),file,id\)/);
+  assert.doesNotMatch(native,/TextToSpeech\.Engine\.KEY_PARAM_LANGUAGE/);
+  assert.match(native,/put\("rawVoiceCount",t\.voices\?\.size \?: 0\)/);
 });
