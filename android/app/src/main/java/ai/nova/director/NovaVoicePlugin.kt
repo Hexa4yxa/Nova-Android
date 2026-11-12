@@ -99,20 +99,44 @@ class NovaVoicePlugin : Plugin() {
         } finally { chosen.shutdown() }
     }
 
-    private fun localVoices(t: TextToSpeech): List<Voice> =
-        (t.voices ?: emptySet()).filter {
-            !it.isNetworkConnectionRequired &&
-                (it.locale.language == "uk" || it.locale.language == "ru")
+    // HayaiTTS v2.5.1 advertises multi-language Supertonic speaker voices
+    // with ONLY the FIRST language in Voice.locale (often Arabic). Filtering
+    // solely by ru/uk silently hides all ten speakers even though its model
+    // supports both languages. Only permit this exception for installed
+    // Supertonic voices from the explicitly selected offline Hayai engine.
+    private fun isHayai(engineId: String?): Boolean =
+        engineId == "dev.ahmedmohamed.hayaitts"
+    private fun isSupertonic(voice: Voice): Boolean =
+        voice.name.contains("supertonic", ignoreCase = true)
+
+    private fun localVoices(t: TextToSpeech, engineId: String? = null): List<Voice> =
+        (t.voices ?: emptySet()).filter { voice ->
+            !voice.isNetworkConnectionRequired &&
+                (voice.locale.language == "uk" || voice.locale.language == "ru" ||
+                    (isHayai(engineId) && isSupertonic(voice)))
         }.sortedWith(compareByDescending<Voice> { it.quality }
             .thenBy { it.latency }
             .thenBy { it.name })
+
+    // The Android framework otherwise forwards Voice.locale (e.g. Arabic)
+    // to the multilingual engine. Per-utterance params override that tag
+    // while preserving the exact speaker voice name selected by the user.
+    private fun voiceParams(voice: Voice, language: String): Bundle =
+        Bundle().apply {
+            if(isSupertonic(voice)) {
+                require(language == "ru" || language == "uk") { "Нужен язык ru/uk." }
+                putString(TextToSpeech.Engine.KEY_PARAM_LANGUAGE, language)
+                putString(TextToSpeech.Engine.KEY_PARAM_COUNTRY, if(language=="uk") "UA" else "RU")
+                putString(TextToSpeech.Engine.KEY_PARAM_VARIANT, "")
+            }
+        }
 
     @PluginMethod
     fun status(call: PluginCall) {
         scope.launch {
             try {
                 withSelectedEngine(call.getString("engineId")) { t ->
-                    val voices=localVoices(t)
+                    val voices=localVoices(t,call.getString("engineId"))
                     call.resolve(JSObject().apply {
                         put("available",voices.isNotEmpty())
                         put("count",voices.size)
@@ -133,7 +157,10 @@ class NovaVoicePlugin : Plugin() {
                             voices.forEach { voice ->
                                 put(JSObject().apply {
                                     put("id",voice.name)
-                                    put("language",voice.locale.language)
+                                    put("label",if(isSupertonic(voice))
+                                        "Supertonic · "+voice.name.substringAfterLast("#")
+                                        else voice.name)
+                                    put("language",if(isSupertonic(voice)) "ru/uk" else voice.locale.language)
                                     put("quality",voice.quality)
                                     put("latency",voice.latency)
                                 })
@@ -155,12 +182,13 @@ class NovaVoicePlugin : Plugin() {
                 withSelectedEngine(call.getString("engineId")) { t ->
                 val line = (call.getString("text") ?: "Привет! Я Нова, твой офлайн-режиссёр.").take(140)
                 val lang = if (Regex("[ІіЇїЄєҐґ]").containsMatchIn(line)) "uk" else "ru"
-                val voices = localVoices(t)
+                val voices = localVoices(t,call.getString("engineId"))
                 val requestedId=call.getString("voiceId")?.trim().orEmpty()
-                val matched=voices.filter { it.locale.language == lang }
-                val voice = matched.firstOrNull { it.name == requestedId }
-                    ?:matched.firstOrNull()
-                    ?:voices.firstOrNull()
+                val voice = if(requestedId.isNotEmpty())
+                    voices.firstOrNull { it.name==requestedId }
+                        ?:error("Выбранный голос не найден. Проверь голоса HayaiTTS заново.")
+                else voices.firstOrNull { it.locale.language==lang }
+                    ?:voices.firstOrNull { isSupertonic(it) }
                     ?:error("Нет установленных локальных голосов. Интернет-голоса запрещены.")
                 check(line.isNotBlank()) { "Нужен текст для озвучивания." }
                 t.voice = voice
@@ -169,7 +197,7 @@ class NovaVoicePlugin : Plugin() {
                 val id="nova-preview-"+UUID.randomUUID()
                 val completed=CompletableDeferred<Boolean>()
                 utterances[id]=completed
-                val result=t.speak(line,TextToSpeech.QUEUE_FLUSH,Bundle(),id)
+                val result=t.speak(line,TextToSpeech.QUEUE_FLUSH,voiceParams(voice,lang),id)
                 if(result!=TextToSpeech.SUCCESS)utterances.remove(id)
                 check(result==TextToSpeech.SUCCESS) { "Android не запустил локальную озвучку." }
                 val spoken=withTimeoutOrNull(30000){completed.await()} ?: false
@@ -244,16 +272,19 @@ class NovaVoicePlugin : Plugin() {
             var resultUri:Uri?=null
             try {
                 withSelectedEngine(call.getString("engineId")) { t ->
-                val voices=localVoices(t).filter { it.locale.language==selectedLanguage }
-                require(voices.isNotEmpty()) {
-                    "На устройстве нет локального голоса языка "+selectedLanguage+". Немой MP4 сохранён."
-                }
-                // A requested voice is selected only from installed OFFLINE voices of the target language.
+                val voices=localVoices(t,call.getString("engineId"))
                 val voiceId=call.getString("voiceId")?.trim().orEmpty()
-                val narrator=voices.firstOrNull { it.name==voiceId } ?: voices.first()
-                val character=voices.firstOrNull { it.name!=narrator.name && it.locale.language==narrator.locale.language }
-                    ?:voices.firstOrNull { it.name!=narrator.name }
-                    ?:narrator
+                val narrator=if(voiceId.isNotEmpty())
+                    voices.firstOrNull { it.name==voiceId }
+                        ?:error("Выбранный офлайн-голос не найден. Проверь список голосов заново.")
+                else voices.firstOrNull { it.locale.language==selectedLanguage }
+                    ?:voices.firstOrNull { isSupertonic(it) }
+                    ?:error("Не найден локальный голос языка "+selectedLanguage+".")
+                // Keep the same multilingual model for dialogue; never
+                // unexpectedly switch back to Piper/Google in the same story.
+                val character=if(isSupertonic(narrator)) narrator
+                    else voices.firstOrNull { it.name!=narrator.name &&
+                        it.locale.language==selectedLanguage } ?: narrator
                 val sourceInfo=readVideoInfo(source)
                 val seconds=sourceInfo.second
                 require(seconds in 2..90) { "Продолжительность MP4 должна быть от 2 до 90 секунд." }
@@ -271,7 +302,7 @@ class NovaVoicePlugin : Plugin() {
                     t.setPitch(if(line.character && selected.name==narrator.name) 1.04f else 1.0f)
                     val wav=File(context.cacheDir,"nova-voice-${UUID.randomUUID()}.wav")
                     try {
-                        synthesize(t,line.text,wav)
+                        synthesize(t,line.text,wav,selected,selectedLanguage)
                         addVoice(samples,line,readWav(wav))
                     } finally { wav.delete() }
                     notifyListeners("novaVoiceProgress", JSObject().apply {
@@ -313,12 +344,12 @@ class NovaVoicePlugin : Plugin() {
         }
     }
 
-    private suspend fun synthesize(t:TextToSpeech,text:String,file:File) {
+    private suspend fun synthesize(t:TextToSpeech,text:String,file:File,voice:Voice,language:String) {
         val id="nova-file-"+UUID.randomUUID().toString()
         val result=CompletableDeferred<Boolean>()
         utterances[id]=result
         try {
-            check(t.synthesizeToFile(text,Bundle(),file,id)==TextToSpeech.SUCCESS) {
+            check(t.synthesizeToFile(text,voiceParams(voice,language),file,id)==TextToSpeech.SUCCESS) {
                 "Android отказался синтезировать речь локально."
             }
             val success=withTimeoutOrNull(30_000L){result.await()} ?: false
