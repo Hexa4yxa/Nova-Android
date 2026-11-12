@@ -470,7 +470,7 @@ function render(api) {
    const autoVoice=node(voicePick,'option','','Автоматически — лучший по версии Android');
    autoVoice.value='';
    for(const item of status.voices||[]){
-    const entry=node(voicePick,'option','',item.id+' ('+item.language+')');
+    const entry=node(voicePick,'option','',(item.label||item.id)+' ('+item.language+')');
     entry.value=item.id;
    }
    voicePick.value=enginePick.value===(story.voiceEngineId||'')?(story.voiceId||''):'';
@@ -501,7 +501,7 @@ function render(api) {
    };
   }
 
-  node(audioSettings,'p','small','Более живой офлайн-голос: установи HayaiTTS, загрузи голос ru/uk в его библиотеке, затем выбери HayaiTTS здесь. Менять системный голос телефона не требуется.');
+  node(audioSettings,'p','small','HayaiTTS: выбери Supertonic · speaker_0…speaker_9 (10 голосов). Они многоязычные: NOVA передаст русский или украинский язык при озвучке. Сначала проверь короткую фразу кнопкой «Послушать голос».');
   const ttsLink=node(audioSettings,'a','brain-caption','HayaiTTS — официальный APK для ARM64');
   ttsLink.href='https://github.com/HayaiApp/HayaiTTS/releases/download/v2.5.1/hayaitts-arm64-v8a-v2.5.1.apk';
   ttsLink.target='_blank';
