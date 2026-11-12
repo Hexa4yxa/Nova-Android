@@ -149,7 +149,7 @@ test('user can keep an optional character line without changing storyboard',()=>
 test('Android native speech is explicitly offline and muxes AAC with untouched H264 video',()=>{
  const text=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  const activity=fs.readFileSync('android/app/src/main/java/ai/nova/director/MainActivity.java','utf8');
- assert.match(text,/!it\.isNetworkConnectionRequired/);
+ assert.match(text,/!voice\.isNetworkConnectionRequired/);
  assert.match(text,/synthesizeToFile\(/);
  assert.match(text,/MediaFormat\.MIMETYPE_AUDIO_AAC/);
  assert.match(text,/MediaMuxer\(/);
@@ -215,7 +215,7 @@ test('Android TTS accepts only an installed local voice in the selected language
  assert.match(native,/val voiceId=call\.getString\("voiceId"\)/);
  assert.match(native,/val narrator=if\(voiceId\.isNotEmpty\(\)\)/);
  assert.match(native,/voices\.firstOrNull \{ it\.name==voiceId \}/);
- assert.match(native,/!it\.isNetworkConnectionRequired/);
+ assert.match(native,/!voice\.isNetworkConnectionRequired/);
 });
 
 test('NOVA lists all 10 installed Supertonic speakers and passes selected speaker to preview and render',async()=>{
