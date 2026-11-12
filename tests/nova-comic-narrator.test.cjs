@@ -136,7 +136,7 @@ test('Android chooses quality-first offline voices and preserves original MP4 if
  const kt=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(kt,/compareByDescending<Voice> \{ it\.quality \}/);
  assert.match(kt,/!voice\.isNetworkConnectionRequired/);
- assert.match(kt,/val voices=localVoices\(t\)\.filter \{ it\.locale\.language==selectedLanguage \}/);
+ assert.match(kt,/val voices=localVoices\(t,call\.getString\("engineId"\)\)/);
  assert.match(kt,/val softStart=min\(1\.0,i\/1323\.0\)/);
  assert.match(kt,/Исходный MP4 и картинки не изменены/);
 });
