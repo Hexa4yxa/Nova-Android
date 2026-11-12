@@ -464,8 +464,13 @@ function render(api) {
     }catch(e){state.error='Движок TTS: '+(e?.message||String(e));}
     render(api);
    };
-   if(!status.available)
-    node(audioSettings,'p','small','В выбранном движке нет установленных офлайн-голосов на русском или украинском.');
+   if(!status.available){
+    node(audioSettings,'p','small','Android пока не передал NOVA подходящие офлайн-голоса. Это не доказывает, что модель отсутствует в HayaiTTS.');
+    if(typeof status.rawVoiceCount==='number'){
+     const ru=status.ruSupported?'да':'нет',uk=status.ukSupported?'да':'нет';
+     node(audioSettings,'p','small','Диагностика движка: всего голосов в API Android — '+status.rawVoiceCount+'; ru: '+ru+'; uk: '+uk+'.');
+    }
+   }
    const voicePick=node(audioSettings,'select','council-input');
    const autoVoice=node(voicePick,'option','','Автоматически — лучший по версии Android');
    autoVoice.value='';
