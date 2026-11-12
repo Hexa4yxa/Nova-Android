@@ -24,7 +24,17 @@ function setup(voices=true){
  const localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))};
  const calls={voice:[],motion:[],previews:[]};
  const nativeVoice={
-  status:async()=>({available:voices,count:voices?2:0,voices:voices?[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]:[],detail:voices?'local':'No installed offline voices'}),
+  status:async({engineId}={})=>{
+    const multi=engineId==='dev.ahmedmohamed.hayaitts';
+    const entries=voices?(multi
+      ?Array.from({length:10},(_,i)=>({id:'vits-supertonic#'+i+'#speaker_'+i,
+          label:'Supertonic · speaker_'+i,language:'ru/uk'}))
+      :[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]):[];
+    return {available:entries.length>0,count:entries.length,voices:entries,
+      engine:engineId||'com.google.android.tts',
+      engines:[{id:'dev.ahmedmohamed.hayaitts',label:'HayaiTTS'}],
+      detail:voices?'local':'No installed offline voices'};
+   },
   dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};},
   preview:async x=>{calls.previews.push(x);return {started:true,voice:x.voiceId||'ru-offline'};}
  };
@@ -196,13 +206,49 @@ test('Android uses installed engines only, waits for preview and shuts down temp
  assert.doesNotMatch(native,/currentEngine/);
  assert.match(native,/chosen\.shutdown\(\)/);
  assert.match(native,/put\("engines",JSArray\(\)/);
- assert.match(native,/localVoices\(t\).*filter \{ it\.locale\.language==selectedLanguage \}/);
+ assert.match(native,/val voices=localVoices\(t,call\.getString\("engineId"\)\)/);
  assert.match(native,/withTimeoutOrNull\(30000\)\{completed\.await\(\)\}/);
 });
 
 test('Android TTS accepts only an installed local voice in the selected language',()=>{
  const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(native,/val voiceId=call\.getString\("voiceId"\)/);
- assert.match(native,/val narrator=voices\.firstOrNull \{ it\.name==voiceId \} \?: voices\.first\(\)/);
+ assert.match(native,/val narrator=if\(voiceId\.isNotEmpty\(\)\)/);
+ assert.match(native,/voices\.firstOrNull \{ it\.name==voiceId \}/);
  assert.match(native,/!it\.isNetworkConnectionRequired/);
+});
+
+test('NOVA lists all 10 installed Supertonic speakers and passes selected speaker to preview and render',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ const engine=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='dev.ahmedmohamed.hayaitts'));
+ assert.ok(engine);
+ engine.value='dev.ahmedmohamed.hayaitts';
+ await engine.onchange();
+ const picker=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='vits-supertonic#7#speaker_7'));
+ assert.ok(picker);
+ assert.equal(picker.children.filter(o=>o.value.startsWith('vits-supertonic')).length,10);
+ picker.value='vits-supertonic#7#speaker_7';
+ await x.button('Послушать голос').onclick();
+ assert.equal(x.calls.previews[0].voiceId,'vits-supertonic#7#speaker_7');
+ assert.equal(x.calls.previews[0].engineId,'dev.ahmedmohamed.hayaitts');
+ const again=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='vits-supertonic#7#speaker_7'));
+ again.value='vits-supertonic#7#speaker_7';
+ x.button('Выбрать голос').onclick();
+ assert.equal(x.director.read()[0].voiceId,'vits-supertonic#7#speaker_7');
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].voiceId,'vits-supertonic#7#speaker_7');
+ assert.equal(x.calls.voice[0].engineId,'dev.ahmedmohamed.hayaitts');
+});
+test('NOVA overrides framework first-language locale for multi-language Supertonic audio',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/voice\.name\.contains\("supertonic", ignoreCase = true\)/);
+ assert.match(native,/isHayai\(engineId\) && isSupertonic\(voice\)/);
+ assert.match(native,/putString\(TextToSpeech\.Engine\.KEY_PARAM_LANGUAGE, language\)/);
+ assert.match(native,/putString\(TextToSpeech\.Engine\.KEY_PARAM_COUNTRY, if\(language=="uk"\)/);
+ assert.match(native,/t\.speak\(line,TextToSpeech\.QUEUE_FLUSH,voiceParams\(voice,lang\),id\)/);
+ assert.match(native,/synthesizeToFile\(text,voiceParams\(voice,language\),file,id\)/);
 });
