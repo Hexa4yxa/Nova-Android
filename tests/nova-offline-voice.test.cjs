@@ -246,7 +246,8 @@ test('NOVA lists all 10 installed Supertonic speakers and passes selected speake
 test('NOVA overrides framework first-language locale for multi-language Supertonic audio',()=>{
  const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  assert.match(native,/voice\.name\.contains\("supertonic", ignoreCase = true\)/);
- assert.match(native,/isHayai\(engineId\) && isSupertonic\(voice\)/);
+ assert.match(native,/isHayai\(effectiveEngineId\) && isSupertonic\(voice\)/);
+  assert.match(native,/engineId\?\.trim\(\)\?\.takeIf \{ it\.isNotEmpty\(\) \} \?: t\.defaultEngine/);
  assert.match(native,/putString\("language", if\(language=="uk"\) "ukr" else "rus"\)/);
  assert.match(native,/putString\("country", if\(language=="uk"\) "UKR" else "RUS"\)/);
  assert.match(native,/t\.speak\(line,TextToSpeech\.QUEUE_FLUSH,voiceParams\(voice,lang\),id\)/);
