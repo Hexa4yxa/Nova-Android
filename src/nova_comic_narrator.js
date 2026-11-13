@@ -6,7 +6,7 @@
 const CYRILLIC=/[А-Яа-яЁёІіЇїЄєҐґ]/u;
 const LATIN=/[A-Za-z]/;
 const UK_MARKERS=/[ІіЇїЄєҐґ]/u;
-const MAX_CHARS=56;
+const MAX_CHARS=78;
 function tidy(value){
  return String(value||'').replace(/\s+/g,' ').trim();
 }
@@ -82,7 +82,7 @@ function prompt(story, lang, secondsPerScene=4){
   'GOOD NARRATION: «Он понял: кто-то ждёт, когда он обернётся.»',
   'Do not narrate visual descriptions. Use character motives, fears, decisions, reveals.',
   'If AUTHOR VOICE LINE appears, preserve its meaning and role; author-entered text takes precedence later.',
-  'Each line: about 4 to 9 SHORT words, MAXIMUM '+MAX_CHARS+' characters, suitable for speaking in '+(secondsPerScene===5?'5':'4')+' seconds.',
+  'Each line: about 8 to 11 SHORT words; aim for 55-75 characters, MAXIMUM '+MAX_CHARS+' characters. Fill the '+(secondsPerScene===5?'5':'4')+'-second scene with meaningful speech, but never add filler or clip a sentence.',
   'Natural punctuation and speech rhythm. No Latin letters, English words, phonetic nonsense, hashtags or stage directions.',
   'Return ONLY a JSON object: {"lines":["...","..."]}. No markdown, no explanation.',
   'Story title: '+tidy(story.title).slice(0,90),
