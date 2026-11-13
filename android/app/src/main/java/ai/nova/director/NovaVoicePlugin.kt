@@ -303,25 +303,36 @@ class NovaVoicePlugin : Plugin() {
                 require(lines.all { it.start+it.duration <= seconds+1 }) {
                     "Озвучка выходит за пределы видеокомикса."
                 }
-                val samples=ShortArray(seconds*44100)
+                val samples=ShortArray(seconds*NovaVoiceTimeline.OUTPUT_RATE)
+                // First synthesize all phrases. Their real WAV lengths, not
+                // the storyboard's nominal five seconds, determine placement.
+                // Keep original film/project intact if speech cannot fit.
+                val clips=ArrayList<Wav>(lines.size)
                 for ((i,line) in lines.withIndex()) {
-                    // Procedural sound design is local and copyright-free.
-                    addEnvironment(samples,line,i)
                     val selected=if(line.character)character else narrator
                     t.voice=selected
-                    // Slightly more measured narration, without slowing past the 4-5s window.
                     t.setSpeechRate(if(line.character) 0.98f else 0.96f)
                     t.setPitch(if(line.character && selected.name==narrator.name) 1.04f else 1.0f)
                     val wav=File(context.cacheDir,"nova-voice-${UUID.randomUUID()}.wav")
                     try {
                         synthesize(t,line.text,wav,selected,selectedLanguage)
-                        addVoice(samples,line,readWav(wav))
+                        clips.add(readWav(wav))
                     } finally { wav.delete() }
                     notifyListeners("novaVoiceProgress", JSObject().apply {
                         put("done",i+1)
                         put("total",lines.size)
                     })
                 }
+                val starts=NovaVoiceTimeline.plan(
+                    lines.map { it.start },
+                    clips.map { voiceFrames(it) },
+                    samples.size
+                )
+                // Optional sound effects stay tied to their original panels.
+                // Voices may flow naturally across a scene cut; no words
+                // are dropped to force a fixed five-second audio slot.
+                lines.forEachIndexed { i,line -> addEnvironment(samples,line,i) }
+                clips.forEachIndexed { i,clip -> addVoice(samples,starts[i],clip) }
                 val encoded=encodeAac(samples)
                 resultUri=context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     ContentValues().apply {
@@ -414,23 +425,26 @@ class NovaVoicePlugin : Plugin() {
         return Wav(pcm,rate)
     }
 
-    private fun addVoice(out:ShortArray,line:Line,wav:Wav) {
-        val start=line.start*44100
-        val allowed=min(line.duration*44100-4410,out.size-start)
-        val actualFrames=(wav.data.size.toLong()*44100/wav.rate).toInt()
-        // Do not quietly cut words in half: the user prefers a safe silent
-        // movie to an unintelligible dubbed movie.
-        require(actualFrames<=allowed+2205) {
-            "Реплика не помещается в отведённые ${line.duration} секунд. Сделай фразу короче."
+    private fun voiceFrames(wav:Wav):Int =
+        ((wav.data.size.toLong()*NovaVoiceTimeline.OUTPUT_RATE + wav.rate - 1) / wav.rate).toInt()
+
+    private fun addVoice(out:ShortArray,start:Int,wav:Wav) {
+        require(start in 0 until out.size) { "Неверное начало озвучки." }
+        val allowed=out.size-start
+        val actualFrames=voiceFrames(wav)
+        // Never truncate words. A too-long narration is rejected before
+        // replacing the original silent movie or overwriting any project.
+        require(actualFrames<=allowed) {
+            "Реплика выходит за границу фильма. Сократи текст озвучки."
         }
-        val clipFrames=min(allowed,actualFrames)
+        val clipFrames=actualFrames
         for(i in 0 until clipFrames){
-            val source=i.toLong()*wav.rate/44100
+            val source=i.toLong()*wav.rate/NovaVoiceTimeline.OUTPUT_RATE
             val sourceIndex=source.toInt().coerceIn(0,wav.data.size-1)
             val softStart=min(1.0,i/1323.0)
             val softEnd=min(1.0,(clipFrames-i)/2205.0)
             val value=(wav.data[sourceIndex].toInt()*0.85*softStart*softEnd).toInt()
-            // Ambient sound stays in the background while narration speaks.
+            // Keep ambience under the voice instead of noisy by default.
             out[start+i]=clamp((out[start+i].toInt()*0.24).toInt()+value)
         }
     }

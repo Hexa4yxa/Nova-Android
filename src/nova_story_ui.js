@@ -742,7 +742,7 @@ function render(api) {
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
    node(voiceDetails,'p','small','По умолчанию NOVA сама напишет связный рассказ по всей истории. Здесь можно задать точную реплику или слова героя.');
    const voiceText=node(voiceDetails,'textarea','council-input');
-   voiceText.maxLength=56;
+   voiceText.maxLength=78;
    voiceText.value=scene.voiceText||'';
    voiceText.placeholder='Необязательно — NOVA напишет сама';
    voiceText.setAttribute('aria-label','Текст озвучки сцены '+scene.number);
@@ -756,7 +756,7 @@ function render(api) {
    saveVoice.disabled=!canEdit();
    saveVoice.onclick=()=>{
     if(!canEdit())return;
-    const text=voiceText.value.trim().slice(0,56);
+    const text=voiceText.value.trim().slice(0,78);
     if(text && (!/[А-Яа-яЁёІіЇїЄєҐґ]/u.test(text)||/[A-Za-z]/.test(text)||text.length<5)){
      state.error='Нужна короткая понятная реплика на русском или украинском (до 56 знаков).';
      render(api);return;
