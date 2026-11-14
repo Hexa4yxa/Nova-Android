@@ -47,6 +47,7 @@ test('first three scenes use the selected preset, not Gemma changing the art med
  for(const preset of d.artStyles()){
   const request=d.ideaRequest(idea,3,'',preset.id);
   assert.match(request,/LOCKED ART STYLE/);
+  assert.doesNotMatch(request,/single English photorealistic Stable Diffusion 1\.5 prompt/);
   const first=d.parse(JSON.stringify(input),idea,preset.id);
   assert.equal(first.styleId,preset.id);
   assert.notEqual(first.style,input.style);
