@@ -158,3 +158,35 @@ test('concurrently completed later frames are skipped and changed future prompts
   'content://media/external/images/media/903'
  ]);
 });
+
+test('manual render never attaches an outdated prompt or anchor to an edited project',async()=>{
+ for(const change of [
+  record=>{record.scenes[0].prompt='A new scene composed during native rendering, with revised character and location.';},
+  record=>{record.scenes[0].referenceEnabled=true;}
+ ]){
+  const x=setup(true);
+  let complete;
+  const deferred=new Promise(resolve=>{complete=resolve;});
+  x.render({generate:async()=>deferred});
+  const active=x.button('Создать кадр 1').onclick();
+  const edited=x.director.read();
+  change(edited[0]);
+  assert.ok(x.director.write(edited));
+  complete({saved:true,imageUri:'content://media/external/images/media/911'});
+  await active;
+  const project=x.director.read()[0];
+  assert.equal(project.scenes[0].imageUri,'');
+  assert.equal(project.scenes[0].prompt,edited[0].scenes[0].prompt);
+  assert.equal(!!project.scenes[0].referenceEnabled,!!edited[0].scenes[0].referenceEnabled);
+ }
+});
+test('manual image button rejects video or malformed MediaStore URIs',async()=>{
+ for(const uri of ['content://media/external/video/media/511',
+  'content://media/external/images/media/not-a-number',
+  'content://media/external/images/media/123?deleted=1']){
+  const x=setup(true);
+  x.render({generate:async()=>({saved:true,imageUri:uri})});
+  await x.button('Создать кадр 1').onclick();
+  assert.equal(x.director.read()[0].scenes[0].imageUri,'');
+ }
+});
