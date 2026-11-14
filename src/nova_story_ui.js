@@ -925,28 +925,31 @@ function render(api) {
      const renderFrame=scene.referenceEnabled?
       (typeof generateWithAnchor==='function'?generateWithAnchor:()=>Promise.reject(Error('Нужен модуль img2img'))):
       generate;
-     const result=await renderFrame(scene.prompt,text=>{progress.textContent=text},scene,story);
+     const renderPrompt=scene.prompt;
+     const renderReference=!!scene.referenceEnabled;
+     const result=await renderFrame(renderPrompt,text=>{progress.textContent=text},scene,story);
      if(result?.saved!==true||typeof result.imageUri!=='string'||
-        !/^content:\/\/media\/\S+$/i.test(result.imageUri))
-      throw Error('Android не подтвердил адрес PNG в Галерее. Кадр не отмечен готовым.');
-     // Read the current saved project: never overwrite changes made after
-     // this UI was opened (other scenes, cast, or voice settings).
+        !/^content:\/\/media\/[^/?]+\/images\/media\/\d+$/i.test(result.imageUri))
+      throw Error('Android не подтвердил сохранение PNG в Галерее. Кадр не отмечен готовым.');
+     // A long CPU render must not commit an obsolete prompt or changed anchor.
+     // Reload the current record: other project and voice edits must survive.
      const latest=director.read();
      const stored=latest.find(item=>item.id===story.id);
      const target=stored?.scenes.find(item=>item.number===scene.number);
      if(!target||target.imageUri)
       throw Error('Проект изменился во время рисования. PNG остаётся в Галерее; проверь сохранённые кадры.');
-     scene.imageUri=result.imageUri;
-     scene.renderSeconds=Number(result.elapsedSeconds)||0;
-     scene.modelLoadMs=Number(result.modelLoadMs)||0;
-     scene.samplingMs=Number(result.samplingMs)||0;
-     scene.referenceApplied=!!result.referenceApplied;
-     Object.assign(target,{imageUri:scene.imageUri,renderSeconds:scene.renderSeconds,
-      modelLoadMs:scene.modelLoadMs,samplingMs:scene.samplingMs,
-      referenceApplied:scene.referenceApplied});
+     if(target.prompt!==renderPrompt||!!target.referenceEnabled!==renderReference)
+      throw Error('Описание или эталон кадра изменились во время рисования. Новый PNG остаётся в Галерее; прежний проект не перезаписан.');
+     const update={imageUri:result.imageUri,
+      renderSeconds:Number(result.elapsedSeconds)||0,
+      modelLoadMs:Number(result.modelLoadMs)||0,
+      samplingMs:Number(result.samplingMs)||0,
+      referenceApplied:!!result.referenceApplied};
+     Object.assign(target,update);
      if(!director.write(latest)) {
       throw Error('Кадр создан, но не удалось обновить историю. PNG сохранён в Галерее.');
      }
+     Object.assign(scene,update);
      if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
      state.notice='✅ Кадр '+scene.number+' создан и сохранён в Галерее.';
     }catch(e){state.error=e?.message||String(e)}
