@@ -58,7 +58,7 @@ test('missing or fake MediaStore URI never records a completed image checkpoint'
  })});
  assert.equal(done.completed,3);
  assert.equal(called,3);
- assert.deepEqual(director.read()[0].scenes.map(s=>s.imageUri),urls);
+ assert.deepEqual(Array.from(director.read()[0].scenes,s=>s.imageUri),urls);
  await chat.resumeExisting({storyId:story.id,generate:async()=>{throw Error('Already saved');}});
  assert.equal(called,3);
 });
