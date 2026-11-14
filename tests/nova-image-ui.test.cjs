@@ -56,7 +56,7 @@ test('quality path uses the actual offline image engine and optional LLM scene p
  assert.match(js,/size===256\?8:12/);
  assert.match(js,/Number\(stepsSelect\.value\)/);
  assert.match(js,/stepsSelect\.value='12'/);
- assert.match(js,/size=512,stepCount=null\)/);
+ assert.match(js,/size=512,stepCount=null,options=null\)/);
  assert.match(js,/sizeSelect\.value='512'/);
  assert.match(js,/imageNegativePrompt/);
  assert.match(js,/imageEnhancedPrompt/);

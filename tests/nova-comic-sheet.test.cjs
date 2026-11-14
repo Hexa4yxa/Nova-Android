@@ -78,17 +78,17 @@ test('NOVA makes ONE comic sheet, preserving the three original project images',
  assert.equal(x.calls.opened[0].pageUri,page);
 });
 
-test('reader uses ONE sheet image for all 3 panels and assigns visual effects',async()=>{
+test('reader exports clean original images and keeps standalone comic sheet',async()=>{
  const x=setup();x.render();await x.button('NOVA, создай комикс').onclick();
  const read=x.button('Читать комикс в MP4');
  assert.equal(read.disabled,false);
  await read.onclick();
  const shots=x.calls.rendered[0].shots;
  assert.equal(shots.length,3);
- assert.deepEqual(Array.from(shots.map(s=>s.imageUri)),[page,page,page]);
- assert.deepEqual(Array.from(shots.map(s=>s.panelIndex)),[0,1,2]);
- assert.deepEqual(Array.from(shots.map(s=>s.panelCount)),[3,3,3]);
- assert.deepEqual(Array.from(shots.map(s=>s.effect)),['rain','torch','fog']);
+ assert.deepEqual(Array.from(shots.map(s=>s.imageUri)),frames);
+ assert.ok(shots.every(s=>s.panelIndex===undefined));
+ assert.ok(shots.every(s=>s.panelCount===undefined));
+ assert.deepEqual(Array.from(shots.map(s=>s.effect)),['none','none','none']); // Never infer rain VFX from prompts.
  const saved=x.director.read()[0];
  assert.equal(saved.movieUri,'content://media/external/video/media/900');
  assert.equal(saved.comicPageUri,page);
@@ -120,4 +120,83 @@ test('native contract: physical comic PNG + EGL panel crop + GPU rain/fire/fog',
  assert.match(motion,/torch/);
  assert.match(motion,/fog/);
  assert.match(activity,/registerPlugin\(NovaComicSheetPlugin\.class\)/);
+});
+
+test('one explicit approval runs existing comic and MP4 tools without another tap',async()=>{
+ const x=setup();x.render();
+ const button=x.button('NOVA, сделай ролик');
+ assert.ok(button);
+ assert.equal(button.disabled,false);
+ assert.equal(x.calls.built.length,0);
+ assert.equal(x.calls.rendered.length,0);
+ await button.onclick();
+ // Production chains its next step only after the first stage commits the comic.
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+ const saved=x.director.read()[0];
+ assert.equal(saved.comicPageUri,page);
+ assert.equal(saved.movieUri,'content://media/external/video/media/900');
+ assert.deepEqual(Array.from(saved.scenes.map(s=>s.imageUri)),frames);
+});
+test('one approval reuses completed comic sheet and does not rebuild frames',async()=>{
+ const x=setup();x.render();await x.button('NOVA, создай комикс').onclick();
+ assert.equal(x.calls.built.length,1);
+ await x.button('NOVA, сделай ролик').onclick();
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+});
+test('production does not start when owner declines and preserves all sources',async()=>{
+ const x=setup();x.render();
+ const source=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(source,/if\(!confirm\('NOVA нарисует/);
+ assert.match(source,/state\.autoFinishStoryId=story\.id/);
+ assert.match(source,/readComic\.onclick\(\{skipConfirm:true\}\)/);
+ assert.match(source,/state\.autoFinishStoryId='';\s*state\.error='Комикс:/);
+ assert.equal(x.director.read()[0].movieUri,undefined);
+ assert.equal(x.calls.rendered.length,0);
+});
+
+test('one approved six-panel story produces thirty seconds with no rerenders',async()=>{
+ const six=[1,2,3,4,5,6].map(i=>'content://media/external/images/media/'+i);
+ const x=setup(six);x.render();
+ await x.button('NOVA, сделай ролик').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.calls.built.length,1);
+ assert.equal(x.calls.rendered.length,1);
+ const shots=x.calls.rendered[0].shots;
+ assert.equal(shots.length,6);
+ assert.ok(shots.every(x=>x.durationSeconds===5));
+ assert.equal(shots.reduce((total,shot)=>total+shot.durationSeconds,0),30);
+ assert.equal(x.director.read()[0].scenes.length,6);
+});
+
+test('MP4 uses full vertical viewport and crops to aspect without captions',()=>{
+ const motion=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaMotionPlugin.kt','utf8');
+ const framing=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVideoFraming.kt','utf8');
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(motion,/NovaVideoFraming\.cover\(imageWidth,imageHeight,width,height\)/);
+ assert.doesNotMatch(motion,/height \* 0\.70f/);
+ assert.match(motion,/GLES20\.glViewport\(0,0,width,height\)/);
+ assert.match(framing,/sourceWidth\.toDouble\(\) \/ sourceHeight/);
+ assert.match(ui,/imageUri:scene\.imageUri/);
+ assert.doesNotMatch(ui,/imageUri:story\.comicPageUri,panelIndex:index/);
+});
+
+
+test('legacy prompts containing rain in every panel do not overlay artificial visual rain',async()=>{
+ const x=setup();const story=x.director.read()[0];
+ story.scenes.forEach(s=>s.prompt+=' heavy rain and storm throughout');
+ x.director.write([story]);x.render();
+ await x.button('NOVA, создай комикс').onclick();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.ok(x.calls.rendered[0].shots.every(shot=>shot.effect==='none'));
+});
+test('video effect is applied only when a specific scene explicitly opts in',async()=>{
+ const x=setup();const story=x.director.read()[0];
+ story.scenes[1].videoEffect='glow';
+ x.director.write([story]);x.render();
+ await x.button('NOVA, создай комикс').onclick();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.deepEqual(Array.from(x.calls.rendered[0].shots.map(s=>s.effect)),['none','glow','none']);
 });

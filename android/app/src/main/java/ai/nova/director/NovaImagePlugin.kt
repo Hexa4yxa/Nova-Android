@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
@@ -280,6 +281,51 @@ class NovaImagePlugin : Plugin() {
         }
     }
 
+    /** Decode only a MediaStore Gallery frame, and bound memory before img2img. */
+    private fun referenceRgb(uriText: String, size: Int): ByteArray {
+        require(Regex("^content://media/[^/?]+/images/media/[0-9]+$",RegexOption.IGNORE_CASE)
+            .matches(uriText)) { "Эталон должен быть сохранённым кадром NOVA" }
+        val uri = Uri.parse(uriText)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri).use { stream ->
+            requireNotNull(stream) { "Кадр-эталон не найден в Галерее" }
+            BitmapFactory.decodeStream(stream, null, bounds)
+        }
+        require(bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192) {
+            "Эталон слишком большой или повреждён"
+        }
+        val options = BitmapFactory.Options().apply {
+            var sample = 1
+            while (bounds.outWidth / sample > size * 2 ||
+                   bounds.outHeight / sample > size * 2) sample *= 2
+            inSampleSize = sample
+        }
+        val decoded = context.contentResolver.openInputStream(uri).use { stream ->
+            requireNotNull(stream) { "Не удалось повторно открыть эталон" }
+            BitmapFactory.decodeStream(stream, null, options)
+        } ?: throw IllegalArgumentException("Не удалось прочитать эталонный PNG")
+        try {
+            val crop = minOf(decoded.width, decoded.height)
+            val square = Bitmap.createBitmap(decoded,
+                (decoded.width - crop) / 2, (decoded.height - crop) / 2, crop, crop)
+            try {
+                val scaled = Bitmap.createScaledBitmap(square, size, size, true)
+                try {
+                    val pixels = IntArray(size * size)
+                    scaled.getPixels(pixels, 0, size, 0, 0, size, size)
+                    val rgb = ByteArray(size * size * 3)
+                    var i = 0
+                    for (pixel in pixels) {
+                        rgb[i++] = ((pixel ushr 16) and 255).toByte()
+                        rgb[i++] = ((pixel ushr 8) and 255).toByte()
+                        rgb[i++] = (pixel and 255).toByte()
+                    }
+                    return rgb
+                } finally { if (scaled !== square) scaled.recycle() }
+            } finally { if (square !== decoded) square.recycle() }
+        } finally { decoded.recycle() }
+    }
+
     @PluginMethod
     fun generate(call: PluginCall) {
         val prompt = call.getString("prompt")?.trim().orEmpty()
@@ -289,8 +335,12 @@ class NovaImagePlugin : Plugin() {
         val steps = call.getInt("steps") ?: 12
         // Optional deterministic seed for CPU/GPU quality comparison. Default behavior is unchanged.
         val seed = call.getInt("seed")?.toLong() ?: System.currentTimeMillis()
+        val referenceUri = call.getString("referenceImageUri")?.trim().orEmpty()
+        val referenceStrength = (call.getDouble("referenceStrength") ?: 0.60).toFloat()
         if (prompt.length !in 5..600 || negative.length > 400 ||
-            size !in listOf(256, 512) || steps !in 1..30) {
+            size !in listOf(256, 512) || steps !in 1..30 ||
+            referenceUri.length > 300 || (referenceUri.isNotEmpty() &&
+            referenceStrength !in 0.25f..0.85f)) {
             call.reject("Проверь описание, размер 256/512 и число шагов 1–30")
             return
         }
@@ -333,8 +383,10 @@ class NovaImagePlugin : Plugin() {
                 }
             }
             try {
+                val initRgb = if (referenceUri.isNotEmpty()) referenceRgb(referenceUri, size) else null
                 val rgb = NativeImageEngine.generate(
-                    file.absolutePath, prompt, negative, size, steps, seed
+                    file.absolutePath, prompt, negative, size, steps, seed,
+                    initRgb, referenceStrength
                 )
                 require(rgb.size == size * size * 3) { "Неполные пиксели изображения" }
                 val timing = NativeImageEngine.timings()
@@ -357,6 +409,7 @@ class NovaImagePlugin : Plugin() {
                         put("preview", "data:image/png;base64," +
                             Base64.encodeToString(png, Base64.NO_WRAP))
                         put("backend", "NOVA Native CPU")
+                        put("referenceApplied", initRgb != null)
                         put("seed", seed)
                         put("modelLoadMs", timing.getOrElse(0) { 0L })
                         put("samplingMs", timing.getOrElse(1) { 0L })

@@ -453,6 +453,17 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
             imageWidth=bitmap.width
             imageHeight=bitmap.height
         }
+        // Preserve aspect ratio while filling 576x1024; don't stretch faces.
+        // For a comic tile, apply the cover crop *within* the tile's UV rect.
+        val fill=NovaVideoFraming.cover(imageWidth,imageHeight,width,height)
+        val originalLeft=cropLeft
+        val originalTop=cropTop
+        val originalWidth=cropWidth
+        val originalHeight=cropHeight
+        cropLeft=originalLeft+originalWidth*fill.left
+        cropTop=originalTop+originalHeight*fill.top
+        cropWidth=originalWidth*fill.width
+        cropHeight=originalHeight*fill.height
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         texture = textures[0]
@@ -471,12 +482,9 @@ private class PanelRenderer(private val target: Surface, private val width: Int,
         GLES20.glViewport(0,0,width,height)
         GLES20.glClearColor(0f,0f,0f,1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        val ratio = imageWidth.toFloat() / imageHeight.toFloat()
-        val pw = min(width * 0.86f, height * 0.70f * ratio)
-        val ph = pw / ratio
-        val panelWidth = pw.roundToInt()
-        val panelHeight = ph.roundToInt()
-        GLES20.glViewport((width-panelWidth)/2,(height-panelHeight)/2,panelWidth,panelHeight)
+        // Full-frame video: already center-cropped to 9:16 during setImage().
+        // Previous letterboxed comic viewport used only 70% of the display height.
+        // Keep the viewport at the encoder's full dimensions.
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D,texture)

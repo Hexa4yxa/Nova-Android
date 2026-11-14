@@ -11,7 +11,7 @@ test('the bundled NOVA interface has valid JavaScript',()=>{
 test('both existing chat and new council remain reachable',()=>{
   assert.match(html,/data-tab="chat"/);
   assert.match(html,/data-tab="council"/);
-  assert.match(js[1],/brain\.chat\(\{message:text,requestId\}\)/);
+  assert.match(js[1],/brain\.chat\(\{message:preparedMessage,requestId\}\)/);
   assert.match(js[1],/brain\.directorCouncil\(/);
   assert.match(js[1],/councilToken/);
   assert.match(js[1],/brain\.cancelChat\(\)/);

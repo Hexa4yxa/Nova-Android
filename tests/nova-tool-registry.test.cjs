@@ -60,17 +60,17 @@ test('generic skills menu and video status are honest',async()=>{
  assert.deepEqual(all,{kind:'capability',tool:'all'});
  const answer=await registry.describeCapability(all,mockReady);
  assert.match(answer,/изображени|PNG|рисов/u);
- assert.match(answer,/видеомонтаж/i);
+ assert.match(answer,/модуль сборки MP4/i);
  const video=registry.classifyCapability('Можешь делать видеомонтаж?',[]);
  assert.equal(video.tool,'video');
- assert.match(await registry.describeCapability(video,mockReady),/ещё не подключён/);
+ assert.match(await registry.describeCapability(video,mockReady),/недоступен/);
 });
 
 test('NOVA webview includes registry before main script and routes BEFORE Gemma',()=>{
- assert.match(html,/<script src="nova_tool_registry\.js"><\/script>\s*<script src="nova_image_prompt_guard\.js"><\/script>\s*<script src="nova_story_director\.js"><\/script>\s*<script src="nova_comic_narrator\.js"><\/script>\s*<script src="nova_story_ui\.js"><\/script>\s*<script src="nova_story_chat\.js"><\/script>\s*<script>/);
+ assert.match(html,/<script src="nova_tool_registry\.js"><\/script>\s*<script src="nova_image_prompt_guard\.js"><\/script>\s*<script src="nova_character_bible\.js"><\/script>\s*<script src="nova_series_ui\.js"><\/script>\s*<script src="nova_story_director\.js"><\/script>\s*<script src="nova_comic_narrator\.js"><\/script>\s*<script src="nova_story_ui\.js"><\/script>\s*<script src="nova_story_chat\.js"><\/script>\s*<script src="nova_director_initiative\.js"><\/script>\s*<script>/);
  assert.doesNotThrow(()=>new vm.Script(inline));
  const capability=inline.indexOf('const capability=window.NovaToolRegistry?.classifyCapability(text,history)');
- const gemma=inline.indexOf('const answer=await brain.chat({message:text,requestId})');
+ const gemma=inline.indexOf('const answer=await brain.chat({message:preparedMessage,requestId})');
  assert.ok(capability>=0&&gemma>capability);
  assert.match(inline,/handleCapabilityMessage\(text,capability\)/);
  assert.match(inline,/route\.tool==='image'/);
@@ -78,4 +78,18 @@ test('NOVA webview includes registry before main script and routes BEFORE Gemma'
  assert.match(inline,/history\.slice\(-6\)/);
  assert.match(inline,/\{kind:'capability',tool:'image'\}/);
 
+});
+
+test('NOVA accurately reports offline voice only when the Android local voice is ready',async()=>{
+ const video={kind:'capability',tool:'video'};
+ const motion={render:async()=>({})};
+ const ready={NovaMotion:motion,NovaVoice:{status:async()=>({available:true}),dubMovie:async()=>({})}};
+ const answer=await registry.describeCapability(video,ready);
+ assert.match(answer,/озвучить через установленный локальный голос Android/);
+ assert.doesNotMatch(answer,/немой|ещё не подключен/);
+ const unavailable={NovaMotion:motion,NovaVoice:{status:async()=>({available:false}),dubMovie:async()=>({})}};
+ const notReady=await registry.describeCapability(video,unavailable);
+ assert.match(notReady,/готовность такого голоса не подтверждена/);
+ const broken={NovaMotion:motion,NovaVoice:{status:async()=>{throw Error('TTS failed')},dubMovie:async()=>({})}};
+ assert.match(await registry.describeCapability(video,broken),/не подтверждена/);
 });

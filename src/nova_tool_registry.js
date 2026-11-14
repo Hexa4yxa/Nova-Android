@@ -70,6 +70,17 @@
       typeof plugins.NovaBrain.directorCouncil === 'function');
     const tools = !!(plugins && plugins.NovaTools);
     const motion = !!(plugins && plugins.NovaMotion && typeof plugins.NovaMotion.render === 'function');
+    const voiceBridge = plugins && plugins.NovaVoice;
+    let voiceReady = false;
+    if (voiceBridge && typeof voiceBridge.status === 'function' && typeof voiceBridge.dubMovie === 'function') {
+      try { voiceReady = !!(await voiceBridge.status()).available; }
+      catch (error) { voiceReady = false; }
+    }
+    const movieDescription = !motion ?
+      'Могу обсуждать сценарий и монтаж, но модуль сборки MP4 в этой версии недоступен.' :
+      voiceReady ?
+      'Могу собрать офлайн-видеокомикс MP4 из готовых кадров, добавить простые эффекты и озвучить через установленный локальный голос Android. Открой «Проекты». Качество голоса зависит от телефона, это не полноценная анимация персонажей.' :
+      'Могу собрать офлайн-видеокомикс MP4 из готовых кадров. Озвучка возможна только при наличии установленного офлайн-голоса ru/uk в Android; сейчас готовность такого голоса не подтверждена. Открой «Проекты». Полноценной анимации персонажей пока нет.';
 
     const imageDescription = !image.available ?
       'Создание изображений сейчас недоступно: ' + image.detail :
@@ -85,17 +96,13 @@
 
     if (route.tool === 'image')
       return imageDescription;
-    if (route.tool === 'video')
-      return motion ?
-        'Могу собрать немой офлайн-видеокомикс MP4 из готовых картинок: открой «Проекты» и нажми «Создать видеокомикс». Озвучка и полноценная анимация ещё не подключены.' :
-        'Я могу разрабатывать сценарии и обсуждать монтаж с режиссёрским советом, ' +
-        'но автоматический монтаж видео внутри этой APK ещё не подключён. Не буду делать вид, что уже смонтировала ролик.';
+    if (route.tool === 'video') return movieDescription;
     const parts = [];
     if (text) parts.push('общаюсь через локальную языковую модель');
     if (council) parts.push('обсуждаю сценарии с режиссёрским советом и текстовым Critic');
     if (tools) parts.push('использую инструменты NOVA для разрешённых тобой загрузок');
     parts.push(imageDescription);
-    parts.push(motion ? 'Из готовых картинок делаю немой видеокомикс MP4 в «Проектах», но офлайн-озвучка и полноценная анимация пока не подключены.' : 'Видеомонтаж и офлайн-голос пока не подключены в этой тестовой APK.');
+    parts.push(movieDescription);
     return parts.join('. ').replace(/\.\./g, '.');
   }
 
