@@ -157,3 +157,36 @@ test('timing diagnostics are persisted instead of claiming artificial speedup',(
  assert.match(chat,/scene\.modelLoadMs=Number\(result\.modelLoadMs\)/);
  assert.match(chat,/scene\.samplingMs=Number\(result\.samplingMs\)/);
 });
+
+test('editing a series actor keeps its id, approved PNG and immutable episode cast',()=>{
+ const {bible,director}=setup();
+ const {series,hero,villain}=createCast(bible);
+ const uri='content://media/external/images/media/123';
+ bible.setReference(hero.id,uri,[uri]);
+ const originalCast=bible.snapshot(series.id);
+ const story=director.parse(JSON.stringify(frames),original,'comic');
+ director.bindSeries(story,originalCast);
+ story.id='episode-before-edit';
+ assert.equal(director.write([story]),true);
+ const savedBefore=JSON.stringify(director.read());
+ const updated=bible.updateCharacter(hero.id,{
+  name:'Марк после путешествия',role:'support',
+  appearance:'adult man with a short black haircut, scar above left eyebrow, grey hoodie, navy jacket'
+ });
+ assert.equal(updated.id,hero.id);
+ assert.equal(updated.referenceImageUri,uri);
+ assert.equal(updated.role,'support');
+ assert.match(bible.getCast(series.id)[0].appearance,/scar above left eyebrow/);
+ assert.equal(bible.snapshot(series.id).cast[0].id,hero.id);
+ assert.equal(JSON.stringify(director.read()),savedBefore,'older episodes never mutate on actor edit');
+ assert.equal(director.read()[0].cast[0].name,'Марк');
+ assert.throws(()=>bible.updateCharacter(hero.id,{name:villain.name,role:'hero',
+  appearance:updated.appearance}),/уже есть/);
+ assert.throws(()=>bible.updateCharacter(hero.id,{name:'Марк',role:'hero',
+  appearance:'новая внешность'}),/английском/);
+ assert.equal(bible.getCast(series.id)[0].name,updated.name);
+ const seriesUi=fs.readFileSync('src/nova_series_ui.js','utf8');
+ assert.match(seriesUi,/bible\.updateCharacter\(actor\.id/);
+ assert.match(seriesUi,/Сохранить паспорт/);
+ assert.match(seriesUi,/как img2img/);
+});
