@@ -70,7 +70,7 @@ test('actual native saves: plan -> project -> three renders -> picture reference
    assert.ok(!/[а-яёіїєґ]/iu.test(prompt),'SD receives validated English prompt');
    prompts.push(prompt);
    update('rendering');
-   return {saved:true,imageUri:'content://media/image/'+prompts.length,
+   return {saved:true,imageUri:'content://media/external/images/media/'+prompts.length,
     elapsedSeconds:prompts.length*12,preview:'data:image/png;base64,PNG'+prompts.length};
   },
   onPlanned:story=>{
@@ -88,7 +88,7 @@ test('actual native saves: plan -> project -> three renders -> picture reference
  assert.equal(director.read().length,2);
  assert.equal(director.read()[0].id,'old-story');
  const newStory=director.read()[1];
- assert.equal(newStory.scenes[2].imageUri,'content://media/image/3');
+ assert.equal(newStory.scenes[2].imageUri,'content://media/external/images/media/3');
  assert.equal(newStory.scenes[2].renderSeconds,36);
 });
 test('stop after first frame preserves original story and completed result',async()=>{
@@ -98,14 +98,14 @@ test('stop after first frame preserves original story and completed result',asyn
   text:'Сочини сказку и нарисуй иллюстрации',
   brain:fakeBrain(),isCancelled:()=>stopped,
   generate:async()=>{
-   frames++;return {saved:true,imageUri:'content://media/first',elapsedSeconds:12};
+   frames++;return {saved:true,imageUri:'content://media/external/images/media/91',elapsedSeconds:12};
   },
   onFrame:()=>{stopped=true;}
  });
  assert.equal(res.cancelled,true);
  assert.equal(frames,1);
  const current=director.read()[0];
- assert.equal(current.scenes[0].imageUri,'content://media/first');
+ assert.equal(current.scenes[0].imageUri,'content://media/external/images/media/91');
  assert.equal(current.scenes[1].imageUri,'');
 });
 test('bad storyboard and unsuccessful native call never claim pictures',async()=>{
@@ -150,12 +150,12 @@ test('resume from saved checkpoint renders only missing frames, not the costly f
   generate:async()=>{
    initialCalls++;
    if(initialCalls===2)throw Error('Android WebView detached');
-   return {saved:true,imageUri:'content://media/first',elapsedSeconds:5880};
+   return {saved:true,imageUri:'content://media/external/images/media/91',elapsedSeconds:5880};
   }
  }),/WebView detached/);
  const saved=director.read();
  assert.equal(saved.length,1);
- assert.equal(saved[0].scenes[0].imageUri,'content://media/first');
+ assert.equal(saved[0].scenes[0].imageUri,'content://media/external/images/media/91');
  assert.equal(saved[0].scenes[1].imageUri,'');
  assert.equal(saved[0].scenes[2].imageUri,'');
  const processed=[];
@@ -163,15 +163,15 @@ test('resume from saved checkpoint renders only missing frames, not the costly f
   storyId:saved[0].id,
   generate:async(prompt)=>{
    processed.push(prompt);
-   return {saved:true,imageUri:'content://media/resumed-'+processed.length,elapsedSeconds:20};
+   return {saved:true,imageUri:'content://media/external/images/media/'+processed.length,elapsedSeconds:20};
   }
  });
  assert.equal(result.completed,3);
  assert.equal(processed.length,2);
  assert.equal(director.read().length,1);
- assert.equal(director.read()[0].scenes[0].imageUri,'content://media/first');
- assert.equal(director.read()[0].scenes[1].imageUri,'content://media/resumed-1');
- assert.equal(director.read()[0].scenes[2].imageUri,'content://media/resumed-2');
+ assert.equal(director.read()[0].scenes[0].imageUri,'content://media/external/images/media/91');
+ assert.equal(director.read()[0].scenes[1].imageUri,'content://media/external/images/media/1');
+ assert.equal(director.read()[0].scenes[2].imageUri,'content://media/external/images/media/2');
  await bridge.resumeExisting({storyId:saved[0].id,generate:async()=>{throw Error('Duplicate costly frame!');}});
  assert.equal(director.read().length,1);
 });
@@ -179,7 +179,7 @@ test('resume cancelled between scenes keeps the completed checkpoint',async()=>{
  const {bridge,director}=setup();
  const story=director.parse(storyboard,'Космическая история');
  story.id='test-resume';
- story.scenes[0].imageUri='content://media/already';
+ story.scenes[0].imageUri='content://media/external/images/media/50';
  assert.ok(director.write([story]));
  let cancelled=false;
  let calls=0;
@@ -187,14 +187,14 @@ test('resume cancelled between scenes keeps the completed checkpoint',async()=>{
   storyId:story.id,isCancelled:()=>cancelled,
   generate:async()=>{
    calls++;
-   return {saved:true,imageUri:'content://media/new',elapsedSeconds:13};
+   return {saved:true,imageUri:'content://media/external/images/media/51',elapsedSeconds:13};
   },
   onFrame:()=>{cancelled=true;}
  });
  assert.equal(res.cancelled,true);
  assert.equal(calls,1);
- assert.equal(director.read()[0].scenes[0].imageUri,'content://media/already');
- assert.equal(director.read()[0].scenes[1].imageUri,'content://media/new');
+ assert.equal(director.read()[0].scenes[0].imageUri,'content://media/external/images/media/50');
+ assert.equal(director.read()[0].scenes[1].imageUri,'content://media/external/images/media/51');
  assert.equal(director.read()[0].scenes[2].imageUri,'');
  await assert.rejects(()=>bridge.resumeExisting({storyId:'not-existing',generate:async()=>{}}),/Не удалось найти/);
  assert.equal(director.read().length,1);
@@ -220,7 +220,7 @@ test('loading conflict: story waits for already-started local model without a se
   chat:fakeBrain().chat
  };
  const result=await bridge.run({text:'Придумай историю и нарисуй картинки',
-   brain,generate:async()=>({saved:true,imageUri:'content://media/new'})});
+   brain,generate:async()=>({saved:true,imageUri:'content://media/external/images/media/51'})});
  assert.equal(result.completed,3);
  assert.equal(prepareCount,0);
  assert.ok(calls>=3);

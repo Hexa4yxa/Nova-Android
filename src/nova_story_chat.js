@@ -58,9 +58,9 @@
  // scene complete when its bridge response lacks a usable saved-image URI.
  function savedImageUri(result){
   return result?.saved===true && typeof result.imageUri==='string' &&
-   /^content:\/\/media\/\S+$/i.test(result.imageUri);
+   /^content:\/\/media\/[^/?]+\/images\/media\/[0-9]+$/i.test(result.imageUri);
  }
- function saveScene(director,storyId,sceneNumber,result){
+ function saveScene(director,storyId,sceneNumber,result,expectedPrompt){
   // Reload current records before changing one: no clearing, slicing or
   // replacing unrelated owner stories. A failed write must halt the job.
   const entries=director.read();
@@ -69,6 +69,12 @@
   const story=entries[index];
   const scene=story.scenes.find(s=>s.number===sceneNumber);
   if(!scene)throw Error('Не найдена сцена проекта. PNG остаётся в Галерее.');
+  // The native renderer can take many minutes. Never replace a newer,
+  // already completed frame or attach an old render to an edited prompt.
+  if(scene.imageUri)
+   throw Error('Кадр '+sceneNumber+' уже сохранён другим процессом. Старый PNG не заменён; новый остаётся в Галерее.');
+  if(scene.prompt!==expectedPrompt)
+   throw Error('Описание кадра '+sceneNumber+' изменилось во время рисования. Новый PNG остаётся в Галерее, проект не перезаписан.');
   scene.imageUri=result.imageUri;
   scene.renderSeconds=Number(result.elapsedSeconds)||0;
   scene.modelLoadMs=Number(result.modelLoadMs)||0;
@@ -120,7 +126,7 @@
     onStatus('Кадр '+scene.number+' из '+story.scenes.length+': '+progress);
    },scene,story);
    if(!savedImageUri(result))throw Error('Генератор не подтвердил сохранение PNG кадра '+scene.number+' в Галерее. Готовые кадры не изменены.');
-   saveScene(director,story.id,scene.number,result);
+   saveScene(director,story.id,scene.number,result,scene.prompt);
    // Keep this in-memory scene current too, for follow-up iteration guards.
    scene.imageUri=result.imageUri;
    scene.renderSeconds=Number(result.elapsedSeconds)||0;

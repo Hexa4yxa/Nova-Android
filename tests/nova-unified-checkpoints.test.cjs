@@ -45,13 +45,17 @@ function setup(ui=false){
 test('missing or fake MediaStore URI never records a completed image checkpoint',async()=>{
  const {director,story,chat}=setup();
  for(const response of [{saved:true},{saved:true,imageUri:'saved'},
-  {saved:true,imageUri:'file:///tmp/fake.png'}, {saved:false,imageUri:'content://media/image/1'}]){
+  {saved:true,imageUri:'file:///tmp/fake.png'},
+  {saved:true,imageUri:'content://media/image/101'},
+  {saved:true,imageUri:'content://media/external/video/media/101'},
+  {saved:true,imageUri:'content://media/external/images/media/NOT_A_NUMBER'},
+  {saved:false,imageUri:'content://media/external/images/media/1'}]){
   await assert.rejects(()=>chat.resumeExisting({
    storyId:story.id,generate:async()=>response
   }),/не подтвердил сохранение PNG/);
   assert.equal(director.read()[0].scenes[0].imageUri,'');
  }
- const urls=['content://media/image/101','content://media/image/102','content://media/image/103'];
+ const urls=['content://media/external/images/media/101','content://media/external/images/media/102','content://media/external/images/media/103'];
  let called=0;
  const done=await chat.resumeExisting({storyId:story.id,generate:async()=>({
   saved:true,imageUri:urls[called++],modelLoadMs:24000,samplingMs:270000
@@ -97,4 +101,28 @@ test('manual generation does not mark an unverified PNG as complete',async()=>{
  await x.button('Создать кадр 1').onclick();
  assert.equal(x.director.read()[0].scenes[0].imageUri,'');
  assert.equal(x.button('Создать кадр 1').disabled,false);
+});
+
+test('late CPU render never replaces an already completed frame or an edited scene',async()=>{
+ const x=setup();
+ let completeFirst;
+ const firstRender=new Promise(resolve=>{completeFirst=resolve;});
+ const first=x.chat.resumeExisting({storyId:x.story.id,generate:async()=>firstRender});
+ const records=x.director.read();
+ records[0].scenes[0].imageUri='content://media/external/images/media/800';
+ assert.ok(x.director.write(records));
+ completeFirst({saved:true,imageUri:'content://media/external/images/media/801'});
+ await assert.rejects(first,/уже сохранён/);
+ assert.equal(x.director.read()[0].scenes[0].imageUri,'content://media/external/images/media/800');
+ let completeSecond;
+ const secondRender=new Promise(resolve=>{completeSecond=resolve;});
+ const second=x.chat.resumeExisting({storyId:x.story.id,generate:async()=>secondRender});
+ const changed=x.director.read();
+ changed[0].scenes[1].prompt='A new approved scene, written while the native image engine was busy.';
+ assert.ok(x.director.write(changed));
+ completeSecond({saved:true,imageUri:'content://media/external/images/media/802'});
+ await assert.rejects(second,/Описание кадра 2 изменилось/);
+ assert.equal(x.director.read()[0].scenes[1].imageUri,'');
+ assert.equal(x.director.read()[0].scenes[1].prompt,changed[0].scenes[1].prompt);
+ assert.equal(x.director.read()[0].scenes[0].imageUri,'content://media/external/images/media/800');
 });
