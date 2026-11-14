@@ -3,18 +3,51 @@
 (function(root) {
 'use strict';
 const KEY='nova_story_projects_v1';
+// Lightweight text presets for the EXISTING SD1.5 model: no downloads or
+// second image engine. They guide composition, not guaranteed face identity.
+const ART_STYLES=Object.freeze([
+ Object.freeze({id:'comic',label:'Кинокомикс',hint:'Чёткие контуры, мрачное кино',
+  prompt:'cinematic graphic novel, bold ink outlines, muted colors, dramatic light'}),
+ Object.freeze({id:'anime',label:'Аниме',hint:'Чистые линии, яркие эмоции',
+  prompt:'anime film illustration, clean line art, expressive faces, soft cel shading'}),
+ Object.freeze({id:'painting',label:'Живописная иллюстрация',hint:'Мягкий рисунок и свет',
+  prompt:'painterly storybook illustration, soft brush textures, atmospheric light'})
+]);
+function artStyles() {
+ return ART_STYLES.map(x=>({id:x.id,label:x.label,hint:x.hint}));
+}
+function findArtStyle(id) {
+ if(id==null||id==='')return null; // Older stories keep their original style.
+ const chosen=ART_STYLES.find(x=>x.id===id);
+ if(!chosen)throw Error('Неизвестный стиль NOVA — выбери один из трёх.');
+ return chosen;
+}
+function detectArtStyle(text) {
+ const words=String(text||'').toLowerCase();
+ if(/аниме|anime|манга|manga/u.test(words))return 'anime';
+ if(/акварел|живопис|painted|watercolor|watercolour|storybook/u.test(words))return 'painting';
+ return 'comic';
+}
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
-function ideaRequest(idea,count=3,councilBrief='') {
+function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
  const subject=clean(idea,380);
  if(subject.length<12)throw Error('Опиши идею истории хотя бы одним предложением.');
  const number=Math.max(1,Math.min(3,Number(count)||3));
+ const chosen=findArtStyle(styleId);
  return [
   'You are NOVA, a creative film director. Create a cohesive ORIGINAL three-scene storyboard.',
   'Story idea from owner (must preserve it): '+subject,
+  ...(chosen?[
+   'LOCKED ART STYLE (mandatory for every scene): '+chosen.prompt,
+   'Use this exact style anchor in the style field. Do not switch to photography or another style.'
+  ]:[]),
   ...(clean(councilBrief,480)?['Approved DIRECTOR COUNCIL outline (guidance for six scenes, not already filmed): '+clean(councilBrief,480)]:[]),
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
-  '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
+  chosen?
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"locked English art style","scenes":[{"beat":"short Russian event","prompt":"single English SD1.5 illustrated scene matching locked style"}] }':
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
   'Make exactly '+number+' scenes. One single protagonist look across all scenes.',
+  'Give the protagonist a fixed distinctive appearance: hair, face and outfit. Repeat the same identity in every scene.',
   'Each English prompt must START with a concrete visible subject doing an ACTION in a specific LOCATION, then framing and light.',
   'Preserve user-mentioned objects, architecture, geography and spatial relations in the relevant scenes. Do not replace them with generic scenery.',
   'Place the actual scene subject and setting BEFORE decorative style or character-consistency notes so SD 1.5 sees them first.',
@@ -38,10 +71,13 @@ function clipWords(value,maxLength) {
  const cut=slice.lastIndexOf(' ');
  return (cut>0?slice.slice(0,cut):slice).replace(/[.,;:\s]+$/,'');
 }
-function validate(result,original) {
+function validate(result,original,styleId=null) {
  if(!result||typeof result!=='object'||!Array.isArray(result.scenes))throw Error('Не удалось получить список сцен.');
  const title=clean(result.title,100);
- const hero=clean(result.hero,220),style=clean(result.style,160);
+ const chosen=findArtStyle(styleId);
+ const hero=clean(result.hero,220);
+ // User-picked preset is authoritative; Gemma cannot silently replace it.
+ const style=chosen?chosen.prompt:clean(result.style,160);
  if(!title||!english(hero)||!english(style))throw Error('Gemma не подготовила английское описание героя и стиля.');
  if(result.scenes.length<1||result.scenes.length>3)throw Error('Нужно от одной до трёх сцен.');
  const scenes=result.scenes.map((x,i)=>{
@@ -51,21 +87,27 @@ function validate(result,original) {
    // SD 1.5's text context is limited. Put the scene-specific subject,
    // action and location FIRST, and continuity anchors AFTER them.
    // Otherwise the tokenizer may drop the real action at the end.
-   const shot=clipWords(rawPrompt,360);
+   const shot=clipWords(rawPrompt,chosen?240:360);
    const heroAnchor=clipWords(hero,100);
    const styleAnchor=clipWords(style,75);
-   const prompt=shot+', same protagonist: '+heroAnchor+
-     ', visual continuity: '+styleAnchor;
+   // In preset mode keep protagonist + style BEFORE optional shot details,
+   // rather than at the tail where SD1.5 may truncate the text context.
+   const comma=chosen?shot.indexOf(','):-1;
+   const lead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
+   const extra=chosen&&comma>0?clipWords(shot.slice(comma+1).trim(),80):'';
+   const prompt=lead+', same protagonist: '+heroAnchor+
+     ', visual continuity: '+styleAnchor+(extra?', '+extra:'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
    return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0};
  });
  return {
    id:'story-'+Date.now(),title,idea:clean(original,380),hero,style,
+   ...(chosen?{styleId:chosen.id}:{}),
    createdAt:new Date().toISOString(),scenes
  };
 }
-function parse(raw,original){return validate(extract(raw),original);}
+function parse(raw,original,styleId=null){return validate(extract(raw),original,styleId);}
 
 /* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
    Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
@@ -82,6 +124,7 @@ function continuationRequest(original,first,councilBrief='') {
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
   'The SAME visual style MUST be: '+clean(first.style,130),
+  'Keep the same face, hairstyle, outfit and art medium in ALL later scenes.',
   'Write ONLY the NEXT THREE distinct scenes (scenes FOUR, FIVE, SIX). Each advances the plot; scene 6 gives a powerful ending.',
   'Return ONLY one compact JSON object, no Markdown, with these fields:',
   '{"title":"same story title","hero":"same English appearance anchor","style":"same English style anchor","scenes":[{"beat":"short Russian action","prompt":"short English SD1.5 visible scene prompt"}]}',
@@ -101,7 +144,7 @@ function appendContinuation(first,raw) {
   throw Error('NOVA должна завершить историю тремя дополнительными сценами.');
  const more=validate({
   title:first.title,hero:first.hero,style:first.style,scenes:parsed.scenes
- },first.idea);
+ },first.idea,first.styleId||null);
  return {...first,
   scenes:first.scenes.concat(more.scenes.map((scene,i)=>({...scene,number:i+4})))
  };
@@ -163,5 +206,5 @@ function mergeBackup(payload) {
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
-root.NovaStoryDirector=Object.freeze({ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);

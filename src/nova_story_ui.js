@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null,artStyleId:'comic'};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -77,6 +77,19 @@ function render(api) {
  editor.maxLength=380;
  editor.value=state.idea;
  editor.oninput=()=>{state.idea=editor.value};
+ // A simple per-project choice, not a model picker or a global Android setting.
+ const styleRow=node(shell,'div','brain-row');
+ node(styleRow,'p','small','🎨 Единый стиль всех шести кадров');
+ const artPick=node(styleRow,'select','council-input');
+ artPick.setAttribute('aria-label','Стиль рисования новой истории');
+ for(const preset of director.artStyles()){
+  const item=node(artPick,'option','',preset.label+' · '+preset.hint);
+  item.value=preset.id;
+ }
+ artPick.value=state.artStyleId;
+ artPick.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
+ artPick.onchange=()=>{state.artStyleId=artPick.value;};
+ node(styleRow,'p','small','Стиль и внешность героя закрепляются в новой истории. Уже созданные кадры не меняются.');
  const button=node(shell,'button','council-button','🧠 NOVA, придумай 6 сцен');
  const feedback=node(shell,'p','small',state.error?'⚠ '+state.error:state.notice);
  button.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||!brain;
@@ -88,7 +101,8 @@ function render(api) {
   state.error='';
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
-   const question=director.ideaRequest(state.idea,3,state.councilBrief);
+   const chosenStyle=state.artStyleId;
+   const question=director.ideaRequest(state.idea,3,state.councilBrief,chosenStyle);
    // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
    // No new models and no image generation until the plan is safely saved.
    // Share the asynchronous native loader; do not race "Initializing".
@@ -100,7 +114,7 @@ function render(api) {
     if(status.engine!=='ModelReady')await brain.prepare();
    }
    const response=await brain.chat({message:question,maxTokens:512});
-   const first=director.parse(response?.answer,state.idea);
+   const first=director.parse(response?.answer,state.idea,chosenStyle);
    feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
    const second=await brain.chat({
     message:director.continuationRequest(state.idea,first,state.councilBrief),maxTokens:512
@@ -688,7 +702,9 @@ function render(api) {
    scenesPanel.hidden=!scenesPanel.hidden;
    show.textContent=scenesPanel.hidden?'▾ Сцены ('+story.scenes.length+')':'▴ Скрыть сцены';
   };
-  node(scenesPanel,'p','brain-caption','Герой: '+story.hero+' · Стиль: '+story.style);
+  node(scenesPanel,'p','brain-caption','Паспорт героя: '+story.hero+' · Стиль: '+
+   (director.artStyles().find(x=>x.id===story.styleId)?.label||story.style));
+  node(scenesPanel,'p','small','NOVA повторяет образ героя и художественный стиль в каждом промпте. Полное совпадение лиц SD1.5 пока не гарантируется.');
   if(remaining.length){
    const resumePanel=node(scenesPanel,'div','brain-row');
    node(resumePanel,'p','small','Готово: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
@@ -758,7 +774,7 @@ function render(api) {
     if(!canEdit())return;
     const text=voiceText.value.trim().slice(0,78);
     if(text && (!/[А-Яа-яЁёІіЇїЄєҐґ]/u.test(text)||/[A-Za-z]/.test(text)||text.length<5)){
-     state.error='Нужна короткая понятная реплика на русском или украинском (до 56 знаков).';
+     state.error='Нужна понятная реплика на русском или украинском (до 78 знаков).';
      render(api);return;
     }
     const saved=director.read();

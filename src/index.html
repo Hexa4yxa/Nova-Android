@@ -224,13 +224,13 @@ function imageRequest(text){
 }
 
 function imageNegativePrompt(prompt){
- const artistic=/(?:anime|аниме|мульт|cartoon|illustration|drawing|ілюстрац)/iu.test(prompt);
+ const artistic=/(?:anime|аниме|мульт|cartoon|illustration|drawing|ілюстрац|graphic novel|comic|ink outlines|painterly|watercolor|storybook|cel shading)/iu.test(prompt);
  return (artistic?'low quality, ugly, duplicate, incorrect proportions':
   'low quality, artificial skin, bad anatomy, deformed face, extra limbs')+
   ', color banding, posterization, neon colors, extreme saturation, distorted, blurry, text, watermark';
 }
 function imageEnhancedPrompt(raw){
- const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац)/iu.test(raw);
+ const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац|graphic novel|comic|ink outlines|painterly|watercolor|storybook|cel shading)/iu.test(raw);
  const detailed=/(?:photorealistic|realistic photography|cinematic lighting|detailed photo|35mm film|high detail)/iu.test(raw);
  if(anime||detailed)return raw.trim();
  return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
