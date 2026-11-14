@@ -1,0 +1,49 @@
+name: Motion Wall Cars - separate Android pilot
+on:
+  push:
+    branches: [prototype/motion-wall-cars-v0]
+    paths:
+      - 'motion-wall/**'
+      - '.github/workflows/motion-wall-pilot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Install Android SDK 36
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Validate 8-second loop
+        run: cd motion-wall && bash tests/run_core_tests.sh
+      - name: Compile Android pilot APK
+        run: cd motion-wall && gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify isolated app package and no network access
+        run: |
+          set -euo pipefail
+          APK=motion-wall/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          TOOL="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$TOOL" dump badging "$APK" | grep "package: name='ai.motionwall.cars'"
+          "$TOOL" dump xmltree "$APK" AndroidManifest.xml | grep -F 'MotionWallpaperService'
+          if "$TOOL" dump permissions "$APK" | grep -iE 'android.permission.(INTERNET|READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE)'; then
+            echo "::error::Prototype must not request network/gallery permission"
+            exit 1
+          fi
+      - name: Upload DEBUG APK for owner phone test
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOTION-WALL-CARS-TEST-APK
+          path: motion-wall/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
