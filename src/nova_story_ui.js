@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null,artStyleId:'comic'};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null,artStyleId:'comic',seriesId:''};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -90,6 +90,16 @@ function render(api) {
  artPick.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
  artPick.onchange=()=>{state.artStyleId=artPick.value;};
  node(styleRow,'p','small','Стиль и внешность героя закрепляются в новой истории. Уже созданные кадры не меняются.');
+ // One persistent cast library serves many episodes, not one-off prompts.
+ if(root.NovaSeriesUI?.render)root.NovaSeriesUI.render(shell,{
+  director,selectedSeriesId:state.seriesId,styleId:state.artStyleId,
+  onSelect:id=>{
+   state.seriesId=id;
+   const series=id?root.NovaCharacterBible.getSeries(id):null;
+   if(series)state.artStyleId=series.styleId;
+   render(api);
+  }
+ });
  const button=node(shell,'button','council-button','🧠 NOVA, придумай 6 сцен');
  const feedback=node(shell,'p','small',state.error?'⚠ '+state.error:state.notice);
  button.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||!brain;
@@ -101,8 +111,11 @@ function render(api) {
   state.error='';
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
-   const chosenStyle=state.artStyleId;
-   const question=director.ideaRequest(state.idea,3,state.councilBrief,chosenStyle);
+   const seriesCast=state.seriesId?root.NovaCharacterBible.snapshot(state.seriesId):null;
+   if(seriesCast&&!seriesCast.cast.length)
+    throw Error('В выбранном сериале ещё нет персонажей. Добавь хотя бы одного.');
+   const chosenStyle=seriesCast?.styleId||state.artStyleId;
+   const question=director.ideaRequest(state.idea,3,state.councilBrief,chosenStyle,seriesCast);
    // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
    // No new models and no image generation until the plan is safely saved.
    // Share the asynchronous native loader; do not race "Initializing".
@@ -117,9 +130,10 @@ function render(api) {
    const first=director.parse(response?.answer,state.idea,chosenStyle);
    feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
    const second=await brain.chat({
-    message:director.continuationRequest(state.idea,first,state.councilBrief),maxTokens:512
+    message:director.continuationRequest(state.idea,first,state.councilBrief,seriesCast),maxTokens:512
    });
    const story=director.appendContinuation(first,second?.answer);
+   if(seriesCast)director.bindSeries(story,seriesCast);
     if(state.councilBrief)story.councilPlan=state.councilBrief;
    const saved=director.read();
    saved.push(story);
@@ -705,6 +719,7 @@ function render(api) {
   node(scenesPanel,'p','brain-caption','Паспорт героя: '+story.hero+' · Стиль: '+
    (director.artStyles().find(x=>x.id===story.styleId)?.label||story.style));
   node(scenesPanel,'p','small','NOVA повторяет образ героя и художественный стиль в каждом промпте. Полное совпадение лиц SD1.5 пока не гарантируется.');
+  if(story.seriesId)node(scenesPanel,'p','small','🎭 Сериал: '+story.seriesTitle+' · Персонажей: '+(story.cast?.length||0)+'.');
   if(remaining.length){
    const resumePanel=node(scenesPanel,'div','brain-row');
    node(resumePanel,'p','small','Готово: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
@@ -754,6 +769,31 @@ function render(api) {
    const row=node(scenesPanel,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);
    node(row,'p','small',scene.beat);
+   if(Array.isArray(story.cast)&&story.cast.length){
+    const castDetails=node(row,'details','nova-more');
+    node(castDetails,'summary','','🎭 Кто присутствует в кадре');
+    node(castDetails,'p','small','Выбери только нужных людей. Пустой список — кадр окружения. После генерации готовый PNG не меняем.');
+    const checks=[];
+    for(const actor of story.cast){
+     const choice=node(castDetails,'label','small');
+     const check=node(choice,'input');
+     check.type='checkbox';
+     check.checked=(scene.castIds||[]).includes(actor.id);
+     check.disabled=!!scene.imageUri||!canEdit();
+     choice.appendChild(document.createTextNode(' '+actor.name+' · '+actor.role));
+     checks.push({id:actor.id,check});
+    }
+    const castSave=node(castDetails,'button','💾 Закрепить состав кадра','council-button');
+    castSave.disabled=!!scene.imageUri||!canEdit();
+    castSave.onclick=()=>{
+     if(!canEdit()||scene.imageUri)return;
+     try{
+      director.setSceneCast(story.id,scene.number,checks.filter(x=>x.check.checked).map(x=>x.id));
+      state.error='';state.notice='✅ Состав сцены '+scene.number+' сохранён без новой генерации.';
+     }catch(e){state.error=e?.message||String(e);}
+     render(api);
+    };
+   }
    const voiceDetails=node(row,'details','nova-more');
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
    node(voiceDetails,'p','small','По умолчанию NOVA сама напишет связный рассказ по всей истории. Здесь можно задать точную реплику или слова героя.');
