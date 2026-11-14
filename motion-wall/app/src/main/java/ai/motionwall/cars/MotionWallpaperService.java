@@ -5,11 +5,12 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.service.wallpaper.WallpaperService;
 import android.view.SurfaceHolder;
 
-/** Android live wallpaper. Never keeps redrawing when it is invisible. */
+/** Visible-only Android live wallpaper. Never runs background animation on a hidden surface. */
 public final class MotionWallpaperService extends WallpaperService {
     @Override public Engine onCreateEngine(){return new RideEngine();}
     private final class RideEngine extends Engine {
@@ -18,14 +19,26 @@ public final class MotionWallpaperService extends WallpaperService {
         private final SharedPreferences prefs=getSharedPreferences(PhotoStore.PREFS,MODE_PRIVATE);
         private final SharedPreferences.OnSharedPreferenceChangeListener listener=(p,key)->{
             if(PhotoStore.IMAGE_KEY.equals(key))handler.post(this::reload);
+            if(MotionSettings.MODE_KEY.equals(key)||MotionSettings.STRENGTH_KEY.equals(key)) {
+                handler.post(()->{
+                    settings=MotionSettings.read(MotionWallpaperService.this);
+                    request();
+                });
+            }
         };
         private final Runnable nextFrame=this::render;
         private Bitmap image;
+        private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
+        private PowerManager power;
         private boolean visible,surfaceReady,destroyed;
         private long firstFrameTime=SystemClock.uptimeMillis();
 
         @Override public void onCreate(SurfaceHolder holder){
-            super.onCreate(holder);prefs.registerOnSharedPreferenceChangeListener(listener);reload();
+            super.onCreate(holder);
+            prefs.registerOnSharedPreferenceChangeListener(listener);
+            settings=MotionSettings.read(MotionWallpaperService.this);
+            power=(PowerManager)getSystemService(POWER_SERVICE);
+            reload();
         }
         private void reload(){
             if(destroyed)return;
@@ -56,10 +69,12 @@ public final class MotionWallpaperService extends WallpaperService {
             try{
                 canvas=holder.lockCanvas();
                 if(canvas!=null)renderer.draw(canvas,canvas.getWidth(),canvas.getHeight(),
-                    image,LoopMath.phase(SystemClock.uptimeMillis()-firstFrameTime));
-            }catch(Exception ignored){}
+                    image,LoopMath.phase(SystemClock.uptimeMillis()-firstFrameTime),settings);
+            }catch(Exception ignored){ /* surface may be closing during a frame */ }
             finally{if(canvas!=null)try{holder.unlockCanvasAndPost(canvas);}catch(Exception ignored){}}
-            if(!destroyed&&visible&&surfaceReady)handler.postDelayed(nextFrame,67);
+            boolean saving=power!=null&&power.isPowerSaveMode();
+            if(!destroyed&&visible&&surfaceReady)
+                handler.postDelayed(nextFrame,MotionMath.frameDelay(saving));
         }
         @Override public void onDestroy(){
             destroyed=true;visible=false;surfaceReady=false;
