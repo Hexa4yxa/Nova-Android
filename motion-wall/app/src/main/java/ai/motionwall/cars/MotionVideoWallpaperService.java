@@ -53,9 +53,9 @@ public final class MotionVideoWallpaperService extends WallpaperService {
                 fresh.setDisplay(getSurfaceHolder());
                 fresh.setLooping(true);
                 fresh.setVolume(0f,0f);
-                fresh.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
                 fresh.setOnPreparedListener(p->{
                     if(generation!=session||destroyed||!surfaceReady)return;
+                    try{p.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);}catch(IllegalStateException ignored){}
                     if(visible)try{p.start();}catch(IllegalStateException ignored){}
                 });
                 fresh.setOnErrorListener((p,what,extra)->{
