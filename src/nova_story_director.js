@@ -43,7 +43,9 @@ function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
   ]:[]),
   ...(clean(councilBrief,480)?['Approved DIRECTOR COUNCIL outline (guidance for six scenes, not already filmed): '+clean(councilBrief,480)]:[]),
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
-  '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
+  chosen?
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"locked English art style","scenes":[{"beat":"short Russian event","prompt":"single English SD1.5 illustrated scene matching locked style"}] }':
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
   'Make exactly '+number+' scenes. One single protagonist look across all scenes.',
   'Give the protagonist a fixed distinctive appearance: hair, face and outfit. Repeat the same identity in every scene.',
   'Each English prompt must START with a concrete visible subject doing an ACTION in a specific LOCATION, then framing and light.',
