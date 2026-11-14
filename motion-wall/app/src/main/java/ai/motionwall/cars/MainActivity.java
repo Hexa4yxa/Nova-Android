@@ -179,9 +179,27 @@ public final class MainActivity extends Activity {
             Color.rgb(123,139,165),false);
         disclaimer.setGravity(Gravity.CENTER_HORIZONTAL);
         addWithMargin(column,disclaimer,0,dp(9),0,0);
+        Button privacy=button("🔒 Конфиденциальность и данные",false);
+        addWithMargin(column,privacy,0,dp(12),0,0);
+        privacy.setOnClickListener(v->showPrivacy());
         setContentView(scroll);
         refreshPhoto();
         if(VideoClipStore.get(this)!=null)playSelectedVideo();
+    }
+    private void showPrivacy(){
+        new android.app.AlertDialog.Builder(this)
+          .setTitle("Motion Wall Cars · Конфиденциальность")
+          .setMessage("Фото и MP4 остаются в памяти телефона. Мы не загружаем их на сервер и не используем рекламу или платные API.\\n\\n"+
+              "Бесплатный Google ML Kit отделяет машину на устройстве, но Google Play services может скачивать модель и передавать Google технические сведения об SDK: диагностику, данные устройства и приложения.\\n\\n"+
+              "Чтобы удалить сохранённые файлы, очисти данные Motion Wall в настройках Android. Оригиналы в Галерее останутся.")
+          .setNeutralButton("Полная политика",(dialog,which)->{
+              try{
+                  startActivity(new Intent(Intent.ACTION_VIEW,
+                      android.net.Uri.parse("https://github.com/Hexa4yxa/Nova-Android/blob/prototype/motion-wall-cars-v0/motion-wall/PRIVACY.md")));
+              }catch(Exception ignored){}
+          })
+          .setPositiveButton("Понятно",null)
+          .show();
     }
     private void addMode(LinearLayout parent,Button button){
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(54),1f);
