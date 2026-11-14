@@ -78,9 +78,10 @@
   onStatus('🧠 NOVA создаёт раскадровку и промпты...');
   if(!(await readyBrain(brain,onStatus,isCancelled)))return {cancelled:true,completed:0};
   if(isCancelled())return {cancelled:true,completed:0};
-  const plan=await brain.chat({message:director.ideaRequest(idea,3),maxTokens:512});
+  const styleId=director.detectArtStyle(idea);
+  const plan=await brain.chat({message:director.ideaRequest(idea,3,'',styleId),maxTokens:512});
   if(isCancelled())return {cancelled:true,completed:0};
-  const first=director.parse(plan?.answer,idea);
+  const first=director.parse(plan?.answer,idea,styleId);
   let story=first;
   if(sceneCount===6){
    onStatus('🧠 Сцены 1–3 готовы, NOVA планирует сцены 4–6...');
