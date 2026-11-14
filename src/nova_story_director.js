@@ -22,6 +22,12 @@ function findArtStyle(id) {
  if(!chosen)throw Error('Неизвестный стиль NOVA — выбери один из трёх.');
  return chosen;
 }
+function detectArtStyle(text) {
+ const words=String(text||'').toLowerCase();
+ if(/аниме|anime|манга|manga/u.test(words))return 'anime';
+ if(/акварел|живопис|painted|watercolor|watercolour|storybook/u.test(words))return 'painting';
+ return 'comic';
+}
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
 function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
  const subject=clean(idea,380);
@@ -198,5 +204,5 @@ function mergeBackup(payload) {
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
-root.NovaStoryDirector=Object.freeze({artStyles,ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
