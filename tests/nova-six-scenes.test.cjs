@@ -121,7 +121,7 @@ test('UI and real chat request six scenes without changing old 3-scene projects'
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
  const html=fs.readFileSync('src/index.html','utf8');
  assert.match(ui,/придумай 6 сцен/);
- assert.match(ui,/director\.continuationRequest\(state\.idea,first,state\.councilBrief\)/);
+ assert.match(ui,/director\.continuationRequest\(state\.idea,first,state\.councilBrief,seriesCast\)/);
  assert.match(ui,/director\.appendContinuation\(first,second\?\.answer\)/);
  assert.match(html,/text,brain,sceneCount:6/);
 });
