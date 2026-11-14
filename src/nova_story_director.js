@@ -29,14 +29,23 @@ function detectArtStyle(text) {
  return 'comic';
 }
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
-function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
+function ideaRequest(idea,count=3,councilBrief='',styleId=null,castPlan=null) {
  const subject=clean(idea,380);
  if(subject.length<12)throw Error('Опиши идею истории хотя бы одним предложением.');
  const number=Math.max(1,Math.min(3,Number(count)||3));
  const chosen=findArtStyle(styleId);
+ const lead=castPlan?.characters?.find(x=>x.id===castPlan.leadCharacterId);
+ if(castPlan&&!lead)throw Error('Не найден главный персонаж сериала.');
+ const cast=root.NovaCastLibrary;
+ const leadAnchor=lead&&cast?cast.anchor(lead):'';
  return [
   'You are NOVA, a creative film director. Create a cohesive ORIGINAL three-scene storyboard.',
   'Story idea from owner (must preserve it): '+subject,
+  ...(lead?[
+   'SERIES BIBLE: '+clean(castPlan.seriesTitle,80)+'. Recurring protagonist: '+clean(lead.name,64)+'.',
+   'CANON LOOK (never change age, hair, face, outfit): '+clean(leadAnchor,250),
+   'Use this ONE named lead in every scene. Do not create look-alike replacements. No extra people unless the scene explicitly requires them.'
+  ]:[]),
   ...(chosen?[
    'LOCKED ART STYLE (mandatory for every scene): '+chosen.prompt,
    'Use this exact style anchor in the style field. Do not switch to photography or another style.'
@@ -71,11 +80,14 @@ function clipWords(value,maxLength) {
  const cut=slice.lastIndexOf(' ');
  return (cut>0?slice.slice(0,cut):slice).replace(/[.,;:\s]+$/,'');
 }
-function validate(result,original,styleId=null) {
+function validate(result,original,styleId=null,castPlan=null) {
  if(!result||typeof result!=='object'||!Array.isArray(result.scenes))throw Error('Не удалось получить список сцен.');
  const title=clean(result.title,100);
  const chosen=findArtStyle(styleId);
- const hero=clean(result.hero,220);
+ const cast=root.NovaCastLibrary;
+ const lead=castPlan?.characters?.find(x=>x.id===castPlan.leadCharacterId);
+ if(castPlan&&!lead)throw Error('Не найден главный персонаж сериала.');
+ const hero=lead&&cast?clean(cast.anchor(lead),275):clean(result.hero,220);
  // User-picked preset is authoritative; Gemma cannot silently replace it.
  const style=chosen?chosen.prompt:clean(result.style,160);
  if(!title||!english(hero)||!english(style))throw Error('Gemma не подготовила английское описание героя и стиля.');
@@ -88,26 +100,36 @@ function validate(result,original,styleId=null) {
    // action and location FIRST, and continuity anchors AFTER them.
    // Otherwise the tokenizer may drop the real action at the end.
    const shot=clipWords(rawPrompt,chosen?240:360);
-   const heroAnchor=clipWords(hero,100);
+   // For a series, keep BOTH the signature face and the canonical outfit
+   // within SD1.5's short prompt budget. Cropping a long appearance first
+   // used to discard the red scarf or coat entirely.
+   const heroAnchor=lead?
+     clipWords(lead.appearance,61)+', '+clipWords(lead.outfit,54):
+     clipWords(hero,100);
    const styleAnchor=clipWords(style,75);
    // In preset mode keep protagonist + style BEFORE optional shot details,
    // rather than at the tail where SD1.5 may truncate the text context.
    const comma=chosen?shot.indexOf(','):-1;
-   const lead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
+   const shotLead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
    const extra=chosen&&comma>0?clipWords(shot.slice(comma+1).trim(),80):'';
-   const prompt=lead+', same protagonist: '+heroAnchor+
-     ', visual continuity: '+styleAnchor+(extra?', '+extra:'');
+   const prompt=shotLead+', same protagonist: '+heroAnchor+
+     ', visual continuity: '+styleAnchor+(extra?', '+extra:'')+
+     (castPlan?', single registered protagonist':'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
-   return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0};
+   return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0,
+    ...(castPlan?{basePrompt:rawPrompt,castIds:[castPlan.leadCharacterId]}:{})};
  });
  return {
    id:'story-'+Date.now(),title,idea:clean(original,380),hero,style,
    ...(chosen?{styleId:chosen.id}:{}),
+   ...(castPlan?{seriesId:castPlan.seriesId,seriesTitle:castPlan.seriesTitle,
+     leadCharacterId:castPlan.leadCharacterId,
+     castSnapshot:castPlan.characters.map(x=>({...x}))}:{}),
    createdAt:new Date().toISOString(),scenes
  };
 }
-function parse(raw,original,styleId=null){return validate(extract(raw),original,styleId);}
+function parse(raw,original,styleId=null,castPlan=null){return validate(extract(raw),original,styleId,castPlan);}
 
 /* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
    Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
@@ -123,6 +145,11 @@ function continuationRequest(original,first,councilBrief='') {
   'The first THREE scenes have ALREADY happened:',
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
+  ...(first.seriesId?[
+   'Original lead clothing (must stay): '+
+    clean(first.castSnapshot.find(x=>x.id===first.leadCharacterId)?.outfit,105)
+  ]:[]),
+  ...(first.seriesId?['SERIES BIBLE: same exact cast, lead id '+clean(first.leadCharacterId,100)+'. Do not swap actors.']:[]),
   'The SAME visual style MUST be: '+clean(first.style,130),
   'Keep the same face, hairstyle, outfit and art medium in ALL later scenes.',
   'Write ONLY the NEXT THREE distinct scenes (scenes FOUR, FIVE, SIX). Each advances the plot; scene 6 gives a powerful ending.',
@@ -144,12 +171,45 @@ function appendContinuation(first,raw) {
   throw Error('NOVA должна завершить историю тремя дополнительными сценами.');
  const more=validate({
   title:first.title,hero:first.hero,style:first.style,scenes:parsed.scenes
- },first.idea,first.styleId||null);
+ },first.idea,first.styleId||null,first.seriesId?{
+  seriesId:first.seriesId,seriesTitle:first.seriesTitle,
+  leadCharacterId:first.leadCharacterId,characters:first.castSnapshot
+ }:null);
  return {...first,
   scenes:first.scenes.concat(more.scenes.map((scene,i)=>({...scene,number:i+4})))
  };
 }
 
+// A scene can feature one or two registered characters. Snapshots freeze
+// their looks per episode, so later actor edits never rewrite saved prompts.
+function assignSceneCast(storyId,sceneNumber,characterIds){
+ const stories=read(),story=stories.find(x=>x.id===storyId);
+ if(!story||!Array.isArray(story.castSnapshot))throw Error('Эта история не подключена к сериалу.');
+ const scene=story.scenes.find(x=>x.number===sceneNumber);
+ if(!scene)throw Error('Сцена не найдена.');
+ if(scene.imageUri)throw Error('Готовый кадр нельзя переназначать: PNG сохраняется без изменений.');
+ if(!Array.isArray(characterIds)||characterIds.length<1||characterIds.length>2||
+   new Set(characterIds).size!==characterIds.length)
+  throw Error('Выбери одного или двух разных персонажей.');
+ const actors=characterIds.map(id=>story.castSnapshot.find(x=>x.id===id));
+ if(actors.some(x=>!x))throw Error('Персонаж не входит в этот сериал.');
+ const source=scene.basePrompt;
+ if(typeof source!=='string'||source.length<25)throw Error('Не сохранён исходный промпт сцены.');
+ const line=clipWords(source.split(',')[0],115);
+ const actorAnchor=(actor,faceMax,outfitMax)=>
+   clipWords(actor.appearance,faceMax)+', '+clipWords(actor.outfit,outfitMax);
+ const first=actorAnchor(actors[0],61,54);
+ const second=actors[1]?actorAnchor(actors[1],48,39):'';
+ const style=clipWords(story.style,73);
+ const description=line+', same protagonist: '+first+
+  (second?', second actor: '+second:'')+', visual continuity: '+style+
+  (second?', exactly two cast characters':', single protagonist, no extra people');
+ if(description.length>590)throw Error('Слишком длинные образы персонажей.');
+ scene.castIds=characterIds.slice();
+ scene.prompt=description;
+ if(!write(stories))throw Error('Не удалось сохранить состав сцены.');
+ return story;
+}
 function read(){
  try{
   const saved=JSON.parse(localStorage.getItem(KEY)||'[]');
@@ -171,7 +231,8 @@ function exportBackup() {
  return JSON.stringify({
    format:'NOVA_STORIES_V1',version:1,
    exportedAt:new Date().toISOString(),
-   stories:read()
+   stories:read(),
+   ...(root.NovaCastLibrary?{seriesLibrary:root.NovaCastLibrary.read()}:{})
  });
 }
 function validBackupStory(item) {
@@ -191,6 +252,12 @@ function mergeBackup(payload) {
     !Array.isArray(archive.stories) || archive.stories.length>2500 ||
     !archive.stories.every(validBackupStory))
    throw Error('Неверный формат копии NOVA. Ничего не изменено.');
+ const library=root.NovaCastLibrary;
+ // Validate the optional cast archive BEFORE changing owner projects.
+ if(archive.seriesLibrary!==undefined){
+  if(!library)throw Error('В этой версии NOVA нет библиотеки персонажей.');
+  library.validateBackup(archive.seriesLibrary);
+ }
  const existing=read();
  const seen=new Set(existing.map(item=>item.id));
  const additions=[];
@@ -204,7 +271,10 @@ function mergeBackup(payload) {
  // untouched on a parse error, invalid data, or storage quota failure.
  if(additions.length && !write(existing.concat(additions)))
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
- return {added:additions.length,skipped,total:existing.length+additions.length};
+ const seriesResult=archive.seriesLibrary!==undefined?
+  library.mergeBackup(archive.seriesLibrary):{added:0};
+ return {added:additions.length,skipped,total:existing.length+additions.length,
+  seriesAdded:seriesResult.added};
 }
-root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,assignSceneCast,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
