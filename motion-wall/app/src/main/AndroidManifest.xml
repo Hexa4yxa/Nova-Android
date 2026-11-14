@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- ML Kit's transitive library declares INTERNET. Model installation uses
+         the separate Google Play services process; our app handles photo
+         data only on-device. Enforce no app network permission at build. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove"/>
     <uses-feature android:name="android.software.live_wallpaper" android:required="false"/>
     <application android:label="Motion Wall Cars" android:allowBackup="false"
         android:theme="@style/AppTheme" android:usesCleartextTraffic="false">
