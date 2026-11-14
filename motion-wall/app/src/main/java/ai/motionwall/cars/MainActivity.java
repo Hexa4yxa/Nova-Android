@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
     private boolean videoPreviewOn;
     private TextView status;
     private Button chooseButton,applyButton,chooseVideoButton,applyVideoButton,videoPreviewButton;
-    private Button nightButton,rainButton,neonButton;
+    private Button nightButton,rainButton,neonButton,driveButton,segmentButton;
     private TextView strengthCaption;
     private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
     private boolean busy;
@@ -100,13 +100,23 @@ public final class MainActivity extends Activity {
         nightButton=button("Night Ride",false);
         rainButton=button("Rain Drive",false);
         neonButton=button("Neon",false);
+        driveButton=button("Drive 2.5D",false);
         addMode(modes,nightButton);
         addMode(modes,rainButton);
         addMode(modes,neonButton);
+        addMode(modes,driveButton);
         photoSection.addView(modes);
         nightButton.setOnClickListener(v->setMode(MotionSettings.NIGHT));
         rainButton.setOnClickListener(v->setMode(MotionSettings.RAIN));
         neonButton.setOnClickListener(v->setMode(MotionSettings.NEON));
+        driveButton.setOnClickListener(v->setMode(MotionSettings.DRIVE));
+        driveButton.setEnabled(CarCutoutStore.ready(this));
+        segmentButton=button("✂ Выделить машину бесплатно (ML Kit)",false);
+        addWithMargin(photoSection,segmentButton,0,dp(8),0,0);
+        segmentButton.setOnClickListener(v->segmentCar());
+        addWithMargin(photoSection,label(
+            "Drive 2.5D: машина движется отдельно от дороги. Это бесплатная композиция, не AI-видеогенерация. Колёса из фото не вращаются. ML Kit может скачать модель один раз.",
+            12,Color.rgb(145,158,182),false),0,dp(6),0,dp(6));
         updateModeButtons();
 
         strengthCaption=label("",13,Color.rgb(181,189,207),false);
@@ -183,6 +193,7 @@ public final class MainActivity extends Activity {
         tintMode(nightButton,MotionSettings.NIGHT.equals(settings.mode));
         tintMode(rainButton,MotionSettings.RAIN.equals(settings.mode));
         tintMode(neonButton,MotionSettings.NEON.equals(settings.mode));
+        tintMode(driveButton,MotionSettings.DRIVE.equals(settings.mode));
     }
     private void tintMode(Button button,boolean selected){
         GradientDrawable bg=new GradientDrawable();
@@ -191,6 +202,10 @@ public final class MainActivity extends Activity {
     }
     private void showStrength(){strengthCaption.setText("Сила эффекта: "+settings.strength+"%");}
     private void setMode(String mode){
+        if(MotionSettings.DRIVE.equals(mode)&&!CarCutoutStore.ready(this)){
+            status.setText("Сначала выбери фото и нажми «Выделить машину».");
+            return;
+        }
         MotionSettings changed=new MotionSettings(mode,settings.strength);
         if(!changed.save(this)){status.setText("Не удалось сохранить режим.");return;}
         settings=changed;updateModeButtons();preview.invalidate();
@@ -214,6 +229,31 @@ public final class MainActivity extends Activity {
         bg.setColor(accent?Color.rgb(104,65,205):Color.rgb(39,48,71));
         bg.setCornerRadius(dp(16));result.setBackground(bg);
         result.setMinHeight(dp(60));return result;
+    }
+    private void segmentCar(){
+        if(busy)return;
+        if(!preview.hasPhoto()) {
+            status.setText("Сначала выбери фото автомобиля.");
+            return;
+        }
+        busy=true;
+        segmentButton.setEnabled(false);
+        chooseButton.setEnabled(false);
+        status.setText("Бесплатная модель выделяет автомобиль прямо на телефоне...");
+        CarCutoutStore.generate(getApplicationContext(),()->{
+            busy=false;
+            chooseButton.setEnabled(true);
+            segmentButton.setEnabled(true);
+            driveButton.setEnabled(CarCutoutStore.ready(this));
+            preview.reload();
+            status.setText("✅ Машина отделена от фона. Выбери Drive 2.5D, затем установи живые обои.");
+        },error->{
+            busy=false;
+            chooseButton.setEnabled(true);
+            segmentButton.setEnabled(true);
+            driveButton.setEnabled(CarCutoutStore.ready(this));
+            status.setText("Ошибка выделения: "+error);
+        });
     }
     private void installDemo(){
         if(busy)return;
@@ -319,7 +359,9 @@ public final class MainActivity extends Activity {
                 chooseVideoButton.setEnabled(true);
                 applyVideoButton.setEnabled(VideoClipStore.get(this)!=null);
                 if(failed==null){
-                    refreshPhoto();Toast.makeText(this,"Фотография готова",Toast.LENGTH_SHORT).show();
+                    refreshPhoto();
+                    driveButton.setEnabled(CarCutoutStore.ready(this));
+                    Toast.makeText(this,"Фотография готова",Toast.LENGTH_SHORT).show();
                 }else{
                     status.setText("Ошибка: "+failed);applyButton.setEnabled(preview.hasPhoto());
                 }
@@ -358,8 +400,9 @@ public final class MainActivity extends Activity {
     }
     private final class PreviewView extends View{
         private final NightRideRenderer renderer=new NightRideRenderer();
+        private final DriveSceneRenderer driveRenderer=new DriveSceneRenderer();
         private final long start=SystemClock.uptimeMillis();
-        private Bitmap image;
+        private Bitmap image,carCutout;
         private boolean attached;
         private final Runnable tick=()->{
             if(attached&&isShown()&&getWindowVisibility()==View.VISIBLE){
@@ -372,12 +415,18 @@ public final class MainActivity extends Activity {
             Bitmap fresh=PhotoStore.load(MainActivity.this);
             Bitmap old=image;image=fresh;
             if(old!=null&&old!=fresh&&!old.isRecycled())old.recycle();
+            Bitmap cutout=CarCutoutStore.load(MainActivity.this);
+            Bitmap prior=carCutout;carCutout=cutout;
+            driveRenderer.release();
+            if(prior!=null&&prior!=cutout&&!prior.isRecycled())prior.recycle();
             invalidate();return hasPhoto();
         }
         @Override protected void onDraw(Canvas c){
             super.onDraw(c);
-            renderer.draw(c,getWidth(),getHeight(),image,
-                LoopMath.phase(SystemClock.uptimeMillis()-start),settings);
+            float phase=LoopMath.phase(SystemClock.uptimeMillis()-start);
+            if(MotionSettings.DRIVE.equals(settings.mode)&&carCutout!=null)
+                driveRenderer.draw(c,getWidth(),getHeight(),carCutout,phase,settings.strength);
+            else renderer.draw(c,getWidth(),getHeight(),image,phase,settings);
         }
         @Override protected void onAttachedToWindow(){
             super.onAttachedToWindow();attached=true;
@@ -387,7 +436,9 @@ public final class MainActivity extends Activity {
         @Override protected void onDetachedFromWindow(){
             attached=false;removeCallbacks(tick);
             renderer.release();
+            driveRenderer.release();
             if(image!=null&&!image.isRecycled())image.recycle();image=null;
+            if(carCutout!=null&&!carCutout.isRecycled())carCutout.recycle();carCutout=null;
             super.onDetachedFromWindow();
         }
         @Override protected void onWindowVisibilityChanged(int visibility){
