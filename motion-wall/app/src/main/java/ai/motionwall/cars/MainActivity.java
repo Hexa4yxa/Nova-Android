@@ -359,6 +359,13 @@ public final class MainActivity extends Activity {
                 chooseVideoButton.setEnabled(true);
                 applyVideoButton.setEnabled(VideoClipStore.get(this)!=null);
                 if(failed==null){
+                    // New image invalidates the old segmentation; never
+                    // pretend a previous car mask belongs to another photo.
+                    if(MotionSettings.DRIVE.equals(settings.mode)&&!CarCutoutStore.ready(this)){
+                        MotionSettings fallback=new MotionSettings(MotionSettings.NIGHT,settings.strength);
+                        if(fallback.save(this))settings=fallback;
+                        updateModeButtons();
+                    }
                     refreshPhoto();
                     driveButton.setEnabled(CarCutoutStore.ready(this));
                     Toast.makeText(this,"Фотография готова",Toast.LENGTH_SHORT).show();
