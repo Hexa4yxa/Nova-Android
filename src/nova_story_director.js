@@ -29,7 +29,7 @@ function detectArtStyle(text) {
  return 'comic';
 }
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
-function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
+function ideaRequest(idea,count=3,councilBrief='',styleId=null,seriesCast=null) {
  const subject=clean(idea,380);
  if(subject.length<12)throw Error('Опиши идею истории хотя бы одним предложением.');
  const number=Math.max(1,Math.min(3,Number(count)||3));
@@ -42,6 +42,11 @@ function ideaRequest(idea,count=3,councilBrief='',styleId=null) {
    'Use this exact style anchor in the style field. Do not switch to photography or another style.'
   ]:[]),
   ...(clean(councilBrief,480)?['Approved DIRECTOR COUNCIL outline (guidance for six scenes, not already filmed): '+clean(councilBrief,480)]:[]),
+  ...(seriesCast?.cast?.length?[
+   'FIXED SERIES CAST (do NOT invent different faces or outfits):',
+   seriesCast.cast.map(x=>clean(x.name,40)+' ['+clean(x.role,12)+']: '+clean(x.appearance,155)).join('; ').slice(0,550),
+   'Different named cast members are distinct people. Show only characters required by the plot, no duplicate bodies.'
+  ]:[]),
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
   chosen?
     '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"locked English art style","scenes":[{"beat":"short Russian event","prompt":"single English SD1.5 illustrated scene matching locked style"}] }':
@@ -99,7 +104,7 @@ function validate(result,original,styleId=null) {
      ', visual continuity: '+styleAnchor+(extra?', '+extra:'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
-   return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0};
+   return {number:i+1,beat,prompt,sourcePrompt:rawPrompt,imageUri:'',renderSeconds:0};
  });
  return {
    id:'story-'+Date.now(),title,idea:clean(original,380),hero,style,
@@ -112,7 +117,7 @@ function parse(raw,original,styleId=null){return validate(extract(raw),original,
 /* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
    Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
    This does not change the format of older 1-3 scene stories. */
-function continuationRequest(original,first,councilBrief='') {
+function continuationRequest(original,first,councilBrief='',seriesCast=null) {
  if(!first||!Array.isArray(first.scenes)||first.scenes.length!==3)
   throw Error('Сначала нужно подготовить три начальные сцены.');
  const subject=clean(original,380);
@@ -124,6 +129,10 @@ function continuationRequest(original,first,councilBrief='') {
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
   'The SAME visual style MUST be: '+clean(first.style,130),
+  ...(seriesCast?.cast?.length?[
+   'The registered cast remains unchanged:',
+   seriesCast.cast.map(x=>clean(x.name,40)+': '+clean(x.appearance,120)).join('; ').slice(0,450)
+  ]:[]),
   'Keep the same face, hairstyle, outfit and art medium in ALL later scenes.',
   'Write ONLY the NEXT THREE distinct scenes (scenes FOUR, FIVE, SIX). Each advances the plot; scene 6 gives a powerful ending.',
   'Return ONLY one compact JSON object, no Markdown, with these fields:',
@@ -148,6 +157,62 @@ function appendContinuation(first,raw) {
  return {...first,
   scenes:first.scenes.concat(more.scenes.map((scene,i)=>({...scene,number:i+4})))
  };
+}
+
+// A single series bible spans episodes. Each episode captures an immutable
+// cast snapshot. Scene casting is editable only BEFORE a costly render.
+function castPrompt(source,characters,style) {
+ const original=clean(source,470);
+ if(!english(original)||original.length<25)throw Error('Нет исходного английского описания сцены.');
+ const comma=original.indexOf(',');
+ const lead=clipWords(comma>0?original.slice(0,comma):original,120);
+ const extra=comma>0?clipWords(original.slice(comma+1).trim(),65):'';
+ const actors=characters.slice(0,3).map(x=>clean(x.name,36)+': '+clipWords(x.appearance,112));
+ const cast=actors.length?', cast: '+actors.join('; '):', no characters visible';
+ // SD1.5 CLIP context is short. Put selected actors BEFORE optional details.
+ const result=lead+cast+', visual continuity: '+clipWords(style,75)+(extra?', '+extra:'');
+ return clipWords(result,590);
+}
+function bindSeries(story,bibleSnapshot) {
+ if(!story||!Array.isArray(story.scenes)||!bibleSnapshot||
+    !Array.isArray(bibleSnapshot.cast)||!bibleSnapshot.cast.length)
+  throw Error('Добавь хотя бы одного персонажа в библиотеку сериала.');
+ const characters=bibleSnapshot.cast.map(x=>({
+  id:clean(x.id,120),name:clean(x.name,60),role:clean(x.role,16),
+  appearance:clean(x.appearance,300),referenceImageUri:clean(x.referenceImageUri,260)
+ }));
+ if(characters.some(x=>!x.id||!x.name||!english(x.appearance)||!x.appearance.length||
+   x.appearance.length<12||x.referenceImageUri&&!/^content:\/\/media\/[^/?]+\/images\/media\/\d+$/i.test(x.referenceImageUri)))
+  throw Error('В библии сериала есть неполные паспорта персонажей.');
+ const lead=characters.find(x=>x.role==='hero')||characters[0];
+ story.seriesId=clean(bibleSnapshot.seriesId,120);
+ story.seriesTitle=clean(bibleSnapshot.seriesTitle,90);
+ story.cast=characters;
+ story.hero=lead.appearance;
+ for(const scene of story.scenes){
+  scene.castIds=[lead.id];
+  scene.prompt=castPrompt(scene.sourcePrompt||scene.prompt,[lead],story.style);
+ }
+ return story;
+}
+function setSceneCast(storyId,sceneNumber,ids) {
+ if(!Array.isArray(ids)||ids.length>3||new Set(ids).size!==ids.length)
+  throw Error('В одном кадре можно выбрать до трёх разных персонажей.');
+ const all=read(),story=all.find(s=>s.id===storyId);
+ if(!story||!Array.isArray(story.cast))throw Error('У этого проекта нет библии персонажей.');
+ const scene=story.scenes.find(s=>s.number===sceneNumber);
+ if(!scene)throw Error('Сцена не найдена.');
+ if(scene.imageUri)throw Error('Кадр уже нарисован. Старое изображение и описание не меняем.');
+ if(!scene.sourcePrompt)throw Error('Нет исходного описания. Старый кадр сохранён.');
+ const cast=ids.map(id=>{
+  const actor=story.cast.find(x=>x.id===id);
+  if(!actor)throw Error('Персонаж не найден в составе этого эпизода.');
+  return actor;
+ });
+ scene.castIds=ids.slice();
+ scene.prompt=castPrompt(scene.sourcePrompt,cast,story.style);
+ if(!write(all))throw Error('Не удалось сохранить изменения состава сцены.');
+ return scene;
 }
 
 function read(){
@@ -206,5 +271,5 @@ function mergeBackup(payload) {
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
-root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,bindSeries,setSceneCast,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
