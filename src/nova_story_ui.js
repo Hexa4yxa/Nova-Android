@@ -22,7 +22,7 @@ function prefillCouncil(task,finalPlan) {
   return true;
 }
 function render(api) {
- const {content,brain,generate,resumeStory,isBusy}=api;
+ const {content,brain,generate,generateWithAnchor,resumeStory,isBusy}=api;
  const director=root.NovaStoryDirector;
  content.replaceChildren();
  const shell=node(content,'section','panel');
@@ -793,6 +793,29 @@ function render(api) {
      }catch(e){state.error=e?.message||String(e);}
      render(api);
     };
+    const actorId=(scene.castIds||[]).length===1?scene.castIds[0]:null;
+    const liveActor=actorId?root.NovaCharacterBible?.getCast(story.seriesId)
+     .find(x=>x.id===actorId):null;
+    if(liveActor?.referenceImageUri){
+     const anchorLabel=node(castDetails,'label','small');
+     const anchor=node(anchorLabel,'input');
+     anchor.type='checkbox';anchor.checked=!!scene.referenceEnabled;
+     anchor.disabled=!!scene.imageUri||!canEdit();
+     anchorLabel.appendChild(document.createTextNode(' 🔖 Использовать эталон этого героя (img2img, эксперимент)'));
+     anchor.onchange=()=>{
+      if(!canEdit()||scene.imageUri)return;
+      const all=director.read(),current=all.find(x=>x.id===story.id);
+      const target=current?.scenes.find(x=>x.number===scene.number);
+      if(!target)return;
+      target.referenceEnabled=anchor.checked;
+      if(!director.write(all))state.error='Не удалось сохранить режим img2img.';
+      else{state.error='';state.notice='Режим эталона сохранён. Рисование не запущено.';}
+      render(api);
+     };
+     node(castDetails,'p','small','img2img повторяет часть композиции эталона, поэтому лучше использовать для похожих ракурсов. Полное совпадение лица не гарантировано.');
+    }else{
+     node(castDetails,'p','small','Чтобы включить реальный img2img, закрепи готовый PNG у одного персонажа в «Библии сериала».');
+    }
    }
    const voiceDetails=node(row,'details','nova-more');
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
@@ -876,7 +899,12 @@ function render(api) {
     photo.src=shot;
     photo.alt='Кадр NOVA — сцена '+scene.number;
    }
-   if(scene.imageUri)node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
+   if(scene.imageUri){
+    node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
+    if(scene.modelLoadMs||scene.samplingMs)node(row,'p','small',
+     '⏱ Загрузка модели: '+Math.round((scene.modelLoadMs||0)/1000)+' с · Семплинг: '+
+      Math.round((scene.samplingMs||0)/1000)+' с'+(scene.referenceApplied?' · img2img':''));
+   }
    const progress=node(row,'p','small','');
    const draw=node(row,'button','council-button','🎨 Создать кадр '+scene.number+' · 512×512');
    draw.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
@@ -886,9 +914,15 @@ function render(api) {
     state.drawing=true;draw.disabled=true;
     try{
      progress.textContent='🎬 Передаю готовый промпт генератору...';
-     const result=await generate(scene.prompt,text=>{progress.textContent=text});
+     const renderFrame=scene.referenceEnabled?
+      (typeof generateWithAnchor==='function'?generateWithAnchor:()=>Promise.reject(Error('Нужен модуль img2img'))):
+      generate;
+     const result=await renderFrame(scene.prompt,text=>{progress.textContent=text},scene,story);
      scene.imageUri=result.imageUri||'saved';
      scene.renderSeconds=Number(result.elapsedSeconds)||0;
+     scene.modelLoadMs=Number(result.modelLoadMs)||0;
+     scene.samplingMs=Number(result.samplingMs)||0;
+     scene.referenceApplied=!!result.referenceApplied;
      if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
      if(!director.write(director.read().map(item=>item.id===story.id?story:item))) {
       throw Error('Кадр создан, но не удалось обновить историю. PNG сохранён в Галерее.');
