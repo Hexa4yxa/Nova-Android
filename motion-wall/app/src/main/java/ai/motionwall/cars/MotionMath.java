@@ -21,5 +21,14 @@ public final class MotionMath {
     public static float softPulse(float phase) {
         return .5f - .5f * (float) Math.cos(2d * Math.PI * phase);
     }
-    public static long frameDelay(boolean powerSave) { return powerSave ? 100L : 50L; }
+    /** 
+     * Target GPU 30 fps, software fallback 15 fps, power saver 10 fps.
+     * Subtract actual draw time so a slow frame does not add a second,
+     * unnecessary delay. Keep some idle time to avoid starving launcher UI.
+     */
+    public static long renderDelay(long elapsedMs, boolean powerSave, boolean software) {
+        long target = powerSave ? 100L : software ? 67L : 33L;
+        return Math.max(8L, target - Math.max(0L, elapsedMs));
+    }
+    public static long frameDelay(boolean powerSave) { return powerSave ? 100L : 33L; }
 }
