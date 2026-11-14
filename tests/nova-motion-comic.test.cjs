@@ -118,7 +118,7 @@ test('Council handoff pre-fills Projects without triggering image generation or 
  assert.match(descend(x.content).map(el=>el.textContent).join(' '),/перенесены/);
  const source=fs.readFileSync('src/nova_story_ui.js','utf8');
  const html=fs.readFileSync('src/index.html','utf8');
- assert.match(source,/director\.ideaRequest\(state\.idea,3,state\.councilBrief,chosenStyle\)/);
+ assert.match(source,/director\.ideaRequest\(state\.idea,3,state\.councilBrief,chosenStyle,castPlan\)/);
  assert.match(source,/story\.councilPlan=state\.councilBrief/);
  assert.match(html,/NovaStoryUI\.prefillCouncil\(councilState\.task,councilState\.final\)/);
  assert.match(html,/🎬 Продолжить в Проектах/);
