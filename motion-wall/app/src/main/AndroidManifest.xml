@@ -17,5 +17,14 @@
             </intent-filter>
             <meta-data android:name="android.service.wallpaper" android:resource="@xml/wallpaper"/>
         </service>
+        <!-- Video wallpaper from a real decoded MP4; no camera animation fake. -->
+        <service android:name=".MotionVideoWallpaperService" android:exported="true"
+            android:label="Motion Wall · Видеодвижение"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService"/>
+            </intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/wallpaper"/>
+        </service>
     </application>
 </manifest>
