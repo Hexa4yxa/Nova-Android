@@ -104,11 +104,21 @@ public final class NightRideRenderer {
         int r=neon?255:rain?90:126;
         int g=neon?60:rain?155:100;
         int b=neon?190:255;
+        // No giant solid translucent spotlight: it used to cover the car
+        // with an opaque-looking purple disc on a tall phone screen.
+        // Keep light reflections BELOW the car image, not across its body.
         float lightPulse=MotionMath.softPulse(phase);
-        float gx=(.5f+.33f*MotionMath.wave(phase))*w;
-        brush.setColor(Color.argb((int)((neon?45:25)*amount*(.35f+.65f*lightPulse)),
-            r,g,b));
-        canvas.drawCircle(gx,h*.65f,w*.35f,brush);
+        brush.setStrokeCap(Paint.Cap.ROUND);
+        brush.setStrokeWidth(Math.max(1f,w*(neon?.006f:.003f)));
+        for (int i=0;i<(neon?5:3);i++) {
+            float track=MotionMath.softPulse(phase+i*.18f);
+            float y=h*(.79f+i*.036f);
+            float x=w*(.12f+.15f*track);
+            float len=w*(.05f+.13f*lightPulse);
+            int alpha=(int)((neon?32:rain?14:19)*amount*(.4f+.6f*track));
+            brush.setColor(Color.argb(alpha,r,g,b));
+            canvas.drawLine(x,y,x+len,y,brush);
+        }
 
         // Rain is anchored to periodic integer tracks. Frame 0 equals frame 8s.
         int n=rain?PARTICLES*2:neon?PARTICLES/3:PARTICLES;
