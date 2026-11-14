@@ -24,6 +24,12 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Generate original royalty-free driving loop bundled in test APK
+        run: |
+          python3 -m pip install --quiet Pillow
+          python3 motion-wall/demo/generate_demo.py motion-wall/app/src/main/assets/drive_demo.mp4
+          test -s motion-wall/app/src/main/assets/drive_demo.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 motion-wall/app/src/main/assets/drive_demo.mp4
       - name: Validate 8-second loop
         run: cd motion-wall && bash tests/run_core_tests.sh
       - name: Compile Android pilot APK
@@ -33,6 +39,7 @@ jobs:
           set -euo pipefail
           APK=motion-wall/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
+          unzip -l "$APK" | grep -F 'assets/drive_demo.mp4'
           TOOL="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$TOOL" dump badging "$APK" | grep "package: name='ai.motionwall.cars'"
           "$TOOL" dump xmltree "$APK" AndroidManifest.xml | grep -F 'MotionWallpaperService'
