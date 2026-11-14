@@ -219,7 +219,8 @@ function exportBackup() {
  return JSON.stringify({
    format:'NOVA_STORIES_V1',version:1,
    exportedAt:new Date().toISOString(),
-   stories:read()
+   stories:read(),
+   ...(root.NovaCastLibrary?{seriesLibrary:root.NovaCastLibrary.read()}:{})
  });
 }
 function validBackupStory(item) {
@@ -239,6 +240,12 @@ function mergeBackup(payload) {
     !Array.isArray(archive.stories) || archive.stories.length>2500 ||
     !archive.stories.every(validBackupStory))
    throw Error('Неверный формат копии NOVA. Ничего не изменено.');
+ const library=root.NovaCastLibrary;
+ // Validate the optional cast archive BEFORE changing owner projects.
+ if(archive.seriesLibrary!==undefined){
+  if(!library)throw Error('В этой версии NOVA нет библиотеки персонажей.');
+  library.validateBackup(archive.seriesLibrary);
+ }
  const existing=read();
  const seen=new Set(existing.map(item=>item.id));
  const additions=[];
@@ -252,7 +259,10 @@ function mergeBackup(payload) {
  // untouched on a parse error, invalid data, or storage quota failure.
  if(additions.length && !write(existing.concat(additions)))
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
- return {added:additions.length,skipped,total:existing.length+additions.length};
+ const seriesResult=archive.seriesLibrary!==undefined?
+  library.mergeBackup(archive.seriesLibrary):{added:0};
+ return {added:additions.length,skipped,total:existing.length+additions.length,
+  seriesAdded:seriesResult.added};
 }
 root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,assignSceneCast,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);
