@@ -87,7 +87,7 @@ function validate(result,original,styleId=null,castPlan=null) {
  const cast=root.NovaCastLibrary;
  const lead=castPlan?.characters?.find(x=>x.id===castPlan.leadCharacterId);
  if(castPlan&&!lead)throw Error('Не найден главный персонаж сериала.');
- const hero=lead&&cast?clean(cast.anchor(lead),220):clean(result.hero,220);
+ const hero=lead&&cast?clean(cast.anchor(lead),275):clean(result.hero,220);
  // User-picked preset is authoritative; Gemma cannot silently replace it.
  const style=chosen?chosen.prompt:clean(result.style,160);
  if(!title||!english(hero)||!english(style))throw Error('Gemma не подготовила английское описание героя и стиля.');
@@ -100,7 +100,12 @@ function validate(result,original,styleId=null,castPlan=null) {
    // action and location FIRST, and continuity anchors AFTER them.
    // Otherwise the tokenizer may drop the real action at the end.
    const shot=clipWords(rawPrompt,chosen?240:360);
-   const heroAnchor=clipWords(hero,100);
+   // For a series, keep BOTH the signature face and the canonical outfit
+   // within SD1.5's short prompt budget. Cropping a long appearance first
+   // used to discard the red scarf or coat entirely.
+   const heroAnchor=lead?
+     clipWords(lead.appearance,61)+', '+clipWords(lead.outfit,54):
+     clipWords(hero,100);
    const styleAnchor=clipWords(style,75);
    // In preset mode keep protagonist + style BEFORE optional shot details,
    // rather than at the tail where SD1.5 may truncate the text context.
@@ -108,7 +113,8 @@ function validate(result,original,styleId=null,castPlan=null) {
    const lead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
    const extra=chosen&&comma>0?clipWords(shot.slice(comma+1).trim(),80):'';
    const prompt=lead+', same protagonist: '+heroAnchor+
-     ', visual continuity: '+styleAnchor+(extra?', '+extra:'');
+     ', visual continuity: '+styleAnchor+(extra?', '+extra:'')+
+     (castPlan?', single registered protagonist':'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
    return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0,
@@ -139,6 +145,10 @@ function continuationRequest(original,first,councilBrief='') {
   'The first THREE scenes have ALREADY happened:',
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
+  ...(first.seriesId?[
+   'Original lead clothing (must stay): '+
+    clean(first.castSnapshot.find(x=>x.id===first.leadCharacterId)?.outfit,105)
+  ]:[]),
   ...(first.seriesId?['SERIES BIBLE: same exact cast, lead id '+clean(first.leadCharacterId,100)+'. Do not swap actors.']:[]),
   'The SAME visual style MUST be: '+clean(first.style,130),
   'Keep the same face, hairstyle, outfit and art medium in ALL later scenes.',
@@ -186,8 +196,10 @@ function assignSceneCast(storyId,sceneNumber,characterIds){
  const source=scene.basePrompt;
  if(typeof source!=='string'||source.length<25)throw Error('Не сохранён исходный промпт сцены.');
  const line=clipWords(source.split(',')[0],115);
- const first=clipWords(root.NovaCastLibrary.anchor(actors[0]),105);
- const second=actors[1]?clipWords(root.NovaCastLibrary.anchor(actors[1]),90):'';
+ const actorAnchor=(actor,faceMax,outfitMax)=>
+   clipWords(actor.appearance,faceMax)+', '+clipWords(actor.outfit,outfitMax);
+ const first=actorAnchor(actors[0],61,54);
+ const second=actors[1]?actorAnchor(actors[1],48,39):'';
  const style=clipWords(story.style,73);
  const description=line+', same protagonist: '+first+
   (second?', second actor: '+second:'')+', visual continuity: '+style+
