@@ -159,6 +159,44 @@ function appendContinuation(first,raw) {
  };
 }
 
+// Pick a draft cast at storyboard time, before any expensive SD1.5 render.
+// This is a local, deterministic suggestion: explicit names and mirror-double
+// synonyms in the Russian/Ukrainian scene beat, with English prompt fallback.
+// The user can still correct a scene; do not reinterpret existing projects.
+function sceneMentionsName(text,name) {
+ const label=clean(name,60).toLocaleLowerCase();
+ if(!label)return false;
+ let token=label, suffix='';
+ if(/^[а-яёіїєґ]+$/iu.test(label)) {
+  if(label.endsWith('ия')&&label.length<=4) {
+   token=label.slice(0,-2); suffix='(?:ия|ии|ию|ией|иею)';
+  } else {
+   const stem=label.replace(/(?:ие|ия|ье|ья|ый|ий|ой|ая|яя|[аяьй])$/iu,'');
+   if(stem.length>=4){token=stem;suffix='[а-яёіїєґ]{0,4}';}
+  }
+ }
+ const escaped=token.replace(/[.*+?^${}()|[\]\\]/g,'\\// A single series bible spans episodes. Each episode captures an immutable
+// cast snapshot. Scene casting is editable only BEFORE a costly render.');
+ return new RegExp('(^|[^\\p{L}\\p{N}])'+escaped+suffix+'(?=$|[^\\p{L}\\p{N}])','iu').test(text);
+}
+function sceneHasDouble(beat,actor) {
+ if(actor.role!=='antagonist'||!/(?:отражен|двойник|двійник|reflection|doppelganger|mirror double)/iu.test(actor.name))return false;
+ return /(^|[^\\p{L}\\p{N}])(?:двойник[а-яё]*|двійник[а-яіїєґ]*|doppelganger|mirror double|evil reflection)(?=$|[^\\p{L}\\p{N}])/iu.test(beat);
+}
+function suggestSceneCast(scene,characters,lead) {
+ const beat=clean(scene.beat,400);
+ const source=clean(scene.sourcePrompt||scene.prompt,470);
+ const selected=[lead],seen=new Set([lead.id]);
+ const matches=characters.filter(actor=>actor.id!==lead.id &&
+  (sceneMentionsName(beat,actor.name) || sceneHasDouble(beat,actor) ||
+   sceneMentionsName(source,actor.name)));
+ for(const actor of matches) {
+  if(selected.length>=3)break;
+  if(!seen.has(actor.id)){selected.push(actor);seen.add(actor.id);}
+ }
+ return selected;
+}
+
 // A single series bible spans episodes. Each episode captures an immutable
 // cast snapshot. Scene casting is editable only BEFORE a costly render.
 function castPrompt(source,characters,style) {
@@ -191,8 +229,11 @@ function bindSeries(story,bibleSnapshot) {
  story.cast=characters;
  story.hero=lead.appearance;
  for(const scene of story.scenes){
-  scene.castIds=[lead.id];
-  scene.prompt=castPrompt(scene.sourcePrompt||scene.prompt,[lead],story.style);
+  // Approved older scenes and explicitly assigned rosters are immutable.
+  if(scene.imageUri||Array.isArray(scene.castIds))continue;
+  const chosen=suggestSceneCast(scene,characters,lead);
+  scene.castIds=chosen.map(actor=>actor.id);
+  scene.prompt=castPrompt(scene.sourcePrompt||scene.prompt,chosen,story.style);
  }
  return story;
 }
