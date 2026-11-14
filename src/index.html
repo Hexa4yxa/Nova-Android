@@ -100,6 +100,8 @@ button:disabled{opacity:.45}
 <script src="nova_storyboard.js"></script>
 <script src="nova_tool_registry.js"></script>
 <script src="nova_image_prompt_guard.js"></script>
+<script src="nova_character_bible.js"></script>
+<script src="nova_series_ui.js"></script>
 <script src="nova_story_director.js"></script>
 <script src="nova_comic_narrator.js"></script>
 <script src="nova_story_ui.js"></script>
@@ -235,7 +237,18 @@ function imageEnhancedPrompt(raw){
  if(anime||detailed)return raw.trim();
  return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
 }
-async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCount=null){
+function referenceOptions(scene,story){
+ if(!scene?.referenceEnabled)return null;
+ if(!story?.seriesId||!Array.isArray(scene.castIds)||scene.castIds.length!==1)
+  throw Error('img2img доступен только для одного закреплённого персонажа в кадре.');
+ const actor=rootlessCast(story.seriesId).find(x=>x.id===scene.castIds[0]);
+ if(!actor?.referenceImageUri)throw Error('У этого героя нет доступного сохранённого кадра-эталона.');
+ return {referenceImageUri:actor.referenceImageUri,referenceStrength:0.60};
+}
+function rootlessCast(seriesId){
+ return window.NovaCharacterBible?.getCast(seriesId)||[];
+}
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCount=null,options=null){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -280,9 +293,14 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
      onProgress('🎨 Прогресс движка: '+(e.step||0)+' / '+total+' · настройка '+steps+' шагов SD · '+minutes+' мин. CPU, офлайн.');
    });
    onProgress('🎨 Создаю изображение · '+size+'×'+size+' · '+steps+' шагов. Первый запуск может быть долгим.');
+   if(options?.referenceImageUri)onProgress('🔖 Использую сохранённый кадр как опорное изображение (img2img).');
    const result=await bridge.generate({
      prompt:visualPrompt,negative:imageNegativePrompt(visualPrompt),
-     size,steps
+     size,steps,
+     ...(options?.referenceImageUri?{
+      referenceImageUri:options.referenceImageUri,
+      referenceStrength:options.referenceStrength||0.60
+     }:{})
    });
    result.elapsedSeconds=Math.round((Date.now()-startedAt)/1000);
    result.promptUsed=visualPrompt;
@@ -373,7 +391,8 @@ async function handleStoryImageMessage(text){
  try{
   const outcome=await window.NovaStoryChat.run({
    text,brain,sceneCount:6,
-   generate:(prompt,onProgress)=>executeImageGeneration(prompt,onProgress,512,12),
+   generate:(prompt,onProgress,scene,story)=>
+    executeImageGeneration(prompt,onProgress,512,12,referenceOptions(scene,story)),
    isCancelled:()=>cancelled,
    onStatus:update,
    onPlanned:story=>{
@@ -587,9 +606,12 @@ document.querySelectorAll('nav span').forEach(tab=>{
    content,
    brain:window.Capacitor?.Plugins?.NovaBrain,
    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12),
+   generateWithAnchor:(prompt,update,scene,story)=>
+    executeImageGeneration(prompt,update,512,12,referenceOptions(scene,story)),
    resumeStory:(storyId,onStatus,onFrame,isCancelled)=>window.NovaStoryChat.resumeExisting({
     storyId,onStatus,onFrame,isCancelled,
-    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12)
+    generate:(prompt,update,scene,story)=>
+     executeImageGeneration(prompt,update,512,12,referenceOptions(scene,story))
    }),
    isBusy:()=>busy||imageBusy
   });

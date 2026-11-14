@@ -133,7 +133,7 @@ test('official APK wires real image backend and keeps project/gallery logic',()=
  assert.ok(js.indexOf('window.NovaStoryChat?.wantsStoryImages(text)')<
            js.indexOf('const imagePrompt=imageRequest(text)'));
  assert.match(js,/await window\.NovaStoryChat\.run\(/);
- assert.match(js,/executeImageGeneration\(prompt,onProgress,512,12\)/);
+ assert.match(js,/executeImageGeneration\(prompt,onProgress,512,12,referenceOptions\(scene,story\)\)/);
  assert.match(js,/await image\?\.cancel\?\.\(\)/);
  assert.match(kotlin,/call\.getInt\("maxTokens"\)/);
  assert.match(kotlin,/brain\.chat\(message, maxTokens\)/);

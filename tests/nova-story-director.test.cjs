@@ -142,7 +142,7 @@ test('Projects tab uses Gemma and requires user approval per image frame',()=>{
  assert.match(ui,/await brain\.prepare\(\)/);
  assert.match(ui,/await brain\.chat\(\{message:question,maxTokens:512\}\)/);
  assert.match(ui,/confirm\('Нарисовать сцену /);
- assert.match(ui,/await generate\(scene\.prompt/);
+ assert.match(ui,/await renderFrame\(scene\.prompt/);
  assert.match(ui,/director\.write/);
  assert.match(main,/generate:\(prompt,update\)=>executeImageGeneration\(prompt,update,512,12\)/);
 });
