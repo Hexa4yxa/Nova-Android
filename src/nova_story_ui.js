@@ -918,7 +918,9 @@ function render(api) {
       director.assignSceneCast(story.id,scene.number,ids);
       state.notice='✅ Сцена '+scene.number+' закреплена за '+ids.length+' персонажем(ами).';
       state.error='';render(api);
-      if(scene.imageUri&&actors.length===1&&
+     }catch(e){state.error=e?.message||String(e);render(api);}
+    };
+    if(scene.imageUri&&actors.length===1&&
        /^content:\/\/media\/[^/]+\/images\/media\/\d+$/i.test(scene.imageUri)){
      const referenceButton=node(castBox,'button','council-button','📌 Сохранить этот PNG как эталон героя');
      referenceButton.disabled=!canEdit();
@@ -932,8 +934,6 @@ function render(api) {
       }catch(e){state.error=e?.message||String(e);render(api);}
      };
     }
-   }catch(e){state.error=e?.message||String(e);render(api);}
-    };
    }
    const voiceDetails=node(row,'details','nova-more');
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
