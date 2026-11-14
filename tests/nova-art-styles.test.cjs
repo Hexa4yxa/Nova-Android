@@ -119,7 +119,7 @@ test('the editor chooses art style once, and does not change rendered old frames
  const chat=fs.readFileSync('src/nova_story_chat.js','utf8');
  assert.match(ui,/Стиль рисования новой истории/);
  assert.match(ui,/artPick\.onchange/);
- assert.match(ui,/director\.ideaRequest\(state\.idea,3,state\.councilBrief,chosenStyle\)/);
+ assert.match(ui,/director\.ideaRequest\(state\.idea,3,state\.councilBrief,chosenStyle,seriesCast\)/);
  assert.match(ui,/director\.parse\(response\?\.answer,state\.idea,chosenStyle\)/);
  assert.match(chat,/director\.detectArtStyle\(idea\)/);
  assert.match(chat,/director\.parse\(plan\?\.answer,idea,styleId\)/);
