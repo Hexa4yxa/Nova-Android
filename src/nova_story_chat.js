@@ -65,6 +65,9 @@
   if(!scene)throw Error('Не найдена сцена проекта. PNG остаётся в Галерее.');
   scene.imageUri=result.imageUri||'saved';
   scene.renderSeconds=Number(result.elapsedSeconds)||0;
+  scene.modelLoadMs=Math.max(0,Number(result.modelLoadMs)||0);
+  scene.samplingMs=Math.max(0,Number(result.samplingMs)||0);
+  if(Number.isFinite(Number(result.seed)))scene.renderSeed=Number(result.seed);
   if(!director.write(entries))throw Error('Кадр готов, но не получилось обновить проект. PNG остаётся в Галерее.');
  }
  async function run(options){
@@ -115,6 +118,9 @@
    // Keep this in-memory scene current too, for follow-up iteration guards.
    scene.imageUri=result.imageUri||'saved';
    scene.renderSeconds=Number(result.elapsedSeconds)||0;
+  scene.modelLoadMs=Math.max(0,Number(result.modelLoadMs)||0);
+  scene.samplingMs=Math.max(0,Number(result.samplingMs)||0);
+  if(Number.isFinite(Number(result.seed)))scene.renderSeed=Number(result.seed);
    completed++;
    onFrame({scene,result,completed,total:story.scenes.length,story});
   }
