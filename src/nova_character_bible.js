@@ -63,6 +63,26 @@ function addCharacter(seriesId,entry){
    createdAt:new Date().toISOString()};
  db.characters.push(a);save(db);return a;
 }
+// Edit the shared actor passport without changing its permanent ID, approved
+// image reference, or the immutable cast snapshots inside older episodes.
+function updateCharacter(characterId,entry){
+ const db=read(),actor=db.characters.find(a=>a.id===characterId);
+ if(!actor)throw Error('Персонаж не найден.');
+ const name=clean(entry?.name,60),appearance=clean(entry?.appearance,300);
+ const role=entry?.role;
+ if(name.length<2)throw Error('Назови персонажа.');
+ if(!ROLES.includes(role))throw Error('Неизвестная роль персонажа.');
+ if(appearance.length<12||!/[a-z]/i.test(appearance)||/[а-яёіїєґ]/iu.test(appearance))
+  throw Error('Внешность и одежда должны быть на английском для SD1.5.');
+ if(db.characters.some(a=>a.seriesId===actor.seriesId&&a.id!==actor.id&&
+   a.name.toLocaleLowerCase()===name.toLocaleLowerCase()))
+  throw Error('В этом сериале уже есть персонаж с таким именем.');
+ actor.name=name;
+ actor.role=role;
+ actor.appearance=appearance;
+ save(db);
+ return {...actor};
+}
 function setReference(characterId,uri,availableFrames){
  const db=read(),actor=db.characters.find(a=>a.id===characterId);
  if(!actor)throw Error('Персонаж не найден.');
@@ -95,6 +115,6 @@ function mergeBackup(part){
    characters:db.characters.concat(newChars)});
  return {series:newSeries.length,characters:newChars.length};
 }
-root.NovaCharacterBible=Object.freeze({read,createSeries,addCharacter,setReference,
+root.NovaCharacterBible=Object.freeze({read,createSeries,addCharacter,updateCharacter,setReference,
  getCast,getSeries,snapshot,validateBackup:check,mergeBackup});
 })(typeof window!=='undefined'?window:globalThis);
