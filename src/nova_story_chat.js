@@ -109,7 +109,7 @@
    onStatus('🎨 Рисую кадр '+scene.number+' из '+story.scenes.length+'...');
    const result=await generate(scene.prompt,progress=>{
     onStatus('Кадр '+scene.number+' из '+story.scenes.length+': '+progress);
-   });
+   },scene,story);
    if(!result?.saved)throw Error('Генератор не подтвердил сохранение кадра '+scene.number+'.');
    saveScene(director,story.id,scene.number,result);
    // Keep this in-memory scene current too, for follow-up iteration guards.
