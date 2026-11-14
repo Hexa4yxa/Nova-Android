@@ -18,8 +18,13 @@ public class MotionMathTest {
    throw new AssertionError("environment leaves bars");
   close(MotionMath.wave(0f),MotionMath.wave(1f));
   close(MotionMath.softPulse(0f),MotionMath.softPulse(1f));
-  if(MotionMath.frameDelay(false)!=50 || MotionMath.frameDelay(true)!=100)
-   throw new AssertionError("power-saving interval");
+  if(MotionMath.frameDelay(false)!=33 || MotionMath.frameDelay(true)!=100)
+   throw new AssertionError("preview frame interval");
+  if(MotionMath.renderDelay(9,false,false)!=24)throw new AssertionError("GPU fps");
+  if(MotionMath.renderDelay(9,false,true)!=58)throw new AssertionError("software fps");
+  if(MotionMath.renderDelay(9,true,false)!=91)throw new AssertionError("battery saver");
+  if(MotionMath.renderDelay(120,false,false)!=8)throw new AssertionError("min idle");
+  if(MotionMath.renderDelay(-2,false,false)!=33)throw new AssertionError("negative draw timing");
   System.out.println("PASS: photo fit, cover environment, loop seam, bounds, battery saver");
  }
 }
