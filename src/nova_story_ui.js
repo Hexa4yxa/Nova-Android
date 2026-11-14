@@ -317,6 +317,20 @@ function render(api) {
   const remaining=story.scenes.filter(scene=>!scene.imageUri);
   node(storyBox,'p','small','Кадры: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
    ' · Идея: '+(story.idea||'').slice(0,115)+((story.idea||'').length>115?'…':''));
+  const doneTimes=story.scenes.filter(x=>x.imageUri&&Number(x.renderSeconds)>0);
+  if(doneTimes.length){
+   const total=doneTimes.reduce((sum,x)=>sum+Number(x.renderSeconds),0);
+   const formatTime=seconds=>Math.floor(seconds/60)+' мин '+Math.round(seconds%60)+' с';
+   node(storyBox,'p','small','⏱ Время '+doneTimes.length+' кадр(ов): '+formatTime(total)+
+     ' · в среднем '+formatTime(total/doneTimes.length)+'.');
+   const sampled=doneTimes.filter(x=>Number(x.samplingMs)>0);
+   if(sampled.length){
+    const modelLoad=sampled.reduce((sum,x)=>sum+(Number(x.modelLoadMs)||0),0);
+    const sampling=sampled.reduce((sum,x)=>sum+(Number(x.samplingMs)||0),0);
+    node(storyBox,'p','small','🔬 CPU: загрузка модели '+formatTime(modelLoad/1000)+
+      ' · рисование '+formatTime(sampling/1000)+'.');
+   }
+  }
   const commands=node(storyBox,'div','brain-row');
   const show=node(commands,'button','council-button','▾ Сцены ('+story.scenes.length+')');
   const rename=node(commands,'button','council-button','✎ Название');
@@ -987,7 +1001,9 @@ function render(api) {
     photo.src=shot;
     photo.alt='Кадр NOVA — сцена '+scene.number;
    }
-   if(scene.imageUri)node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
+   if(scene.imageUri)node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+
+     ' сек.'+(Number(scene.samplingMs)>0?' · SD1.5 '+Math.round(scene.samplingMs/1000)+
+     ' сек. · загрузка '+Math.round((scene.modelLoadMs||0)/1000)+' сек.':''));
    const progress=node(row,'p','small','');
    const draw=node(row,'button','council-button','🎨 Создать кадр '+scene.number+' · 512×512');
    draw.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
@@ -1000,6 +1016,9 @@ function render(api) {
      const result=await generate(scene.prompt,text=>{progress.textContent=text});
      scene.imageUri=result.imageUri||'saved';
      scene.renderSeconds=Number(result.elapsedSeconds)||0;
+     scene.modelLoadMs=Math.max(0,Number(result.modelLoadMs)||0);
+     scene.samplingMs=Math.max(0,Number(result.samplingMs)||0);
+     if(Number.isFinite(Number(result.seed)))scene.renderSeed=Number(result.seed);
      if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
      if(!director.write(director.read().map(item=>item.id===story.id?story:item))) {
       throw Error('Кадр создан, но не удалось обновить историю. PNG сохранён в Галерее.');
