@@ -1,0 +1,66 @@
+name: NOVA Unified Release - checkpoint and CPU timing validation
+
+on:
+  push:
+    branches: [feature/nova-unified-release-checkpoints-20261114]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nova-unified-checkpoints-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NOVA_CPU_ARM_TUNED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 8a199ad31a7eb27d5a46a6b08026176d82bc9894
+          path: llama.cpp
+          persist-credentials: false
+      - name: Checkout pinned offline image engine
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 58bb3c1b1cd4749e94e39f537e9adfce295dcaee
+          path: android/stable-diffusion.cpp
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install native toolchain
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" "cmake;3.31.6"
+      - name: Install deps and sync
+        run: |
+          npm ci
+          npx cap sync android
+      - name: Run all existing and new JavaScript regression tests
+        run: node --test tests/*.test.cjs
+      - name: Run Kotlin tests and compile Android APK
+        working-directory: android
+        run: bash gradlew testDebugUnitTest assembleDebug --no-daemon
+      - name: Verify native image included
+        run: unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -F 'lib/arm64-v8a/libnova-image.so'
+      # The runner debug signing key is ephemeral, not compatible with stable NOVA.
+      - name: Upload debug APK for inspection only
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-UNIFIED-CHECKPOINTS-DEBUG-INSPECTION-NOT-AN-UPDATE
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
