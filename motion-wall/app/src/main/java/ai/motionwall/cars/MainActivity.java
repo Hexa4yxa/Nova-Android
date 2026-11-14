@@ -138,6 +138,19 @@ public final class MainActivity extends Activity {
         // AI photo-to-video generator. Label this honestly.
         addWithMargin(videoSection,label("Выбери MP4, где машина действительно едет. Генерация из одного фото пока не реализована.",
             13,Color.rgb(181,189,207),false),0,dp(5),0,dp(8));
+        Button freeSample=button("▶ Бесплатный пример: машина едет",false);
+        addWithMargin(videoSection,freeSample,0,dp(4),0,dp(8));
+        freeSample.setOnClickListener(v->{
+            if(busy)return;
+            if(VideoClipStore.get(this)!=null){
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle("Заменить выбранное видео?")
+                    .setMessage("Исходный MP4 в Галерее останется, но в Motion Wall будет выбран бесплатный пример.")
+                    .setNegativeButton("Отмена",null)
+                    .setPositiveButton("Заменить",(dialog,which)->installDemo())
+                    .show();
+            }else installDemo();
+        });
         chooseVideoButton=button("1 · Выбрать видео автомобиля",false);
         addWithMargin(videoSection,chooseVideoButton,0,dp(4),0,0);
         chooseVideoButton.setOnClickListener(v->pickVideo());
@@ -201,6 +214,30 @@ public final class MainActivity extends Activity {
         bg.setColor(accent?Color.rgb(104,65,205):Color.rgb(39,48,71));
         bg.setCornerRadius(dp(16));result.setBackground(bg);
         result.setMinHeight(dp(60));return result;
+    }
+    private void installDemo(){
+        if(busy)return;
+        busy=true;
+        chooseVideoButton.setEnabled(false);applyVideoButton.setEnabled(false);
+        videoPreviewButton.setEnabled(false);
+        status.setText("Подготавливаю бесплатный пример...");
+        new Thread(()->{
+            String error=null;
+            try{VideoClipStore.installFreeDemo(getApplicationContext());}
+            catch(Exception exception){error=exception.getMessage();}
+            final String failure=error;
+            runOnUiThread(()->{
+                busy=false;
+                chooseVideoButton.setEnabled(true);
+                boolean ready=VideoClipStore.get(this)!=null;
+                applyVideoButton.setEnabled(ready);
+                videoPreviewButton.setEnabled(ready);
+                if(failure==null){
+                    playSelectedVideo();
+                    status.setText("✅ Пример готов: дорога движется, колёса вращаются. Это 2D-анимация, не AI.");
+                }else status.setText("Не удалось загрузить пример: "+failure);
+            });
+        },"motion-wall-demo").start();
     }
     private void playSelectedVideo(){
         File file=VideoClipStore.get(this);
@@ -293,8 +330,9 @@ public final class MainActivity extends Activity {
         if(preview==null)return;
         boolean loaded=preview.reload();
         applyButton.setEnabled(loaded&&!busy);
-        status.setText(loaded?"✅ Фото готово · режим и сила эффекта сохраняются":
-            "Выбери фотографию. Пока показана демонстрационная сцена.");
+        status.setText(VideoClipStore.get(this)!=null?
+            "✅ Видео сохранено на телефоне. Нажми «Смотреть», затем «Установить».":
+            "Попробуй бесплатный пример или выбери своё MP4. Фотоэффекты — отдельно.");
     }
     private void applyWallpaper(){
         if(busy||!preview.hasPhoto()){status.setText("Сначала выбери фотографию.");return;}
