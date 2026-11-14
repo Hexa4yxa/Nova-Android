@@ -88,6 +88,27 @@ function render(parent,{director,selectedSeriesId='',styleId='comic',onSelect=()
   const card=el(characters,'details','','nova-more');
   el(card,'summary',actor.name+' · '+({hero:'Главный',antagonist:'Антагонист',support:'Второстепенный'}[actor.role]||'Герой'));
   el(card,'p',actor.appearance,'small');
+  const editor=el(card,'details','','nova-more');
+  el(editor,'summary','✎ Изменить паспорт персонажа');
+  const editName=el(editor,'input','','council-input');
+  editName.value=actor.name;editName.maxLength=60;
+  editName.setAttribute('aria-label','Имя персонажа '+actor.name);
+  const editRole=el(editor,'select','','council-input');
+  for(const [id,label] of [['hero','Главный герой'],['antagonist','Антигерой / антагонист'],['support','Второстепенный герой']])
+   opt(editRole,id,label);
+  editRole.value=actor.role;
+  const editAppearance=el(editor,'textarea','','council-input');
+  editAppearance.value=actor.appearance;editAppearance.maxLength=300;
+  editAppearance.setAttribute('aria-label','Внешность и одежда '+actor.name);
+  const update=el(editor,'button','💾 Сохранить паспорт','council-button');
+  update.onclick=()=>{
+   try{
+    bible.updateCharacter(actor.id,{name:editName.value,role:editRole.value,
+     appearance:editAppearance.value});
+    onSelect(seriesPick.value);
+   }catch(e){status.textContent='⚠ '+(e?.message||String(e));}
+  };
+  el(editor,'p','Только будущие эпизоды получат обновлённую внешность. Старые кадры и состав серий не меняются.','small');
   const ref=el(card,'select','','council-input');
   ref.setAttribute('aria-label','Эталон персонажа '+actor.name);
   opt(ref,'','Без эталонной картинки');
@@ -102,7 +123,7 @@ function render(parent,{director,selectedSeriesId='',styleId='comic',onSelect=()
   };
   if(actor.referenceImageUri)el(card,'p','✅ Кадр-эталон сохранён в паспорте героя.','small');
  }
- el(panel,'p','Паспорт и привязка эталонного PNG уже сохраняются. Передача картинки в SD1.5 (img2img) требует отдельной проверки и пока не включена.','small');
+ el(panel,'p','Эталонный PNG можно включить как img2img в настройках одиночного кадра. Сцены с несколькими героями не получают изображение-эталон автоматически.','small');
 }
 root.NovaSeriesUI=Object.freeze({render});
 })(typeof window!=='undefined'?window:globalThis);
