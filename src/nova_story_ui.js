@@ -783,7 +783,7 @@ function render(api) {
      choice.appendChild(document.createTextNode(' '+actor.name+' · '+actor.role));
      checks.push({id:actor.id,check});
     }
-    const castSave=node(castDetails,'button','💾 Закрепить состав кадра','council-button');
+    const castSave=node(castDetails,'button','council-button','💾 Закрепить состав кадра');
     castSave.disabled=!!scene.imageUri||!canEdit();
     castSave.onclick=()=>{
      if(!canEdit()||scene.imageUri)return;
