@@ -30,6 +30,10 @@ public final class MotionWallpaperService extends WallpaperService {
         private Bitmap image;
         private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
         private PowerManager power;
+        // Software fallback is only chosen when lockHardwareCanvas fails.
+        // Once lockCanvas has attached the software producer, don't switch
+        // back until the SurfaceHolder is recreated.
+        private boolean softwareSurface;
         private boolean visible,surfaceReady,destroyed;
         private long firstFrameTime=SystemClock.uptimeMillis();
 
@@ -47,7 +51,10 @@ public final class MotionWallpaperService extends WallpaperService {
             request();
         }
         @Override public void onSurfaceCreated(SurfaceHolder holder){
-            super.onSurfaceCreated(holder);surfaceReady=true;request();
+            super.onSurfaceCreated(holder);
+            softwareSurface=false;
+            surfaceReady=true;
+            request();
         }
         @Override public void onSurfaceChanged(SurfaceHolder holder,int format,int width,int height){
             super.onSurfaceChanged(holder,format,width,height);surfaceReady=true;request();
@@ -64,22 +71,35 @@ public final class MotionWallpaperService extends WallpaperService {
         }
         private void render(){
             if(destroyed||!visible||!surfaceReady)return;
+            final long started=SystemClock.uptimeMillis();
             SurfaceHolder holder=getSurfaceHolder();
             Canvas canvas=null;
             try{
-                canvas=holder.lockCanvas();
+                if(!softwareSurface) {
+                    try {
+                        // Android's GPU Canvas compositing avoids a full
+                        // software framebuffer redraw on every wallpaper frame.
+                        canvas=holder.lockHardwareCanvas();
+                    }catch(IllegalStateException|UnsupportedOperationException exception){
+                        softwareSurface=true;
+                    }
+                }
+                if(softwareSurface)canvas=holder.lockCanvas();
                 if(canvas!=null)renderer.draw(canvas,canvas.getWidth(),canvas.getHeight(),
                     image,LoopMath.phase(SystemClock.uptimeMillis()-firstFrameTime),settings);
             }catch(Exception ignored){ /* surface may be closing during a frame */ }
             finally{if(canvas!=null)try{holder.unlockCanvasAndPost(canvas);}catch(Exception ignored){}}
             boolean saving=power!=null&&power.isPowerSaveMode();
-            if(!destroyed&&visible&&surfaceReady)
-                handler.postDelayed(nextFrame,MotionMath.frameDelay(saving));
+            if(!destroyed&&visible&&surfaceReady) {
+                long elapsed=SystemClock.uptimeMillis()-started;
+                handler.postDelayed(nextFrame,MotionMath.renderDelay(elapsed,saving,softwareSurface));
+            }
         }
         @Override public void onDestroy(){
             destroyed=true;visible=false;surfaceReady=false;
             handler.removeCallbacksAndMessages(null);
             prefs.unregisterOnSharedPreferenceChangeListener(listener);
+            renderer.release();
             if(image!=null&&!image.isRecycled())image.recycle();
             image=null;super.onDestroy();
         }
