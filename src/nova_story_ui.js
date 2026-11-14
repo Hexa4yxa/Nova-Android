@@ -175,6 +175,8 @@ function render(api) {
    const role=character.role==='antagonist'?'Антигерой':character.role==='support'?'Второстепенный':'Герой';
    node(info,'summary','',role+' · '+character.name);
    node(info,'p','small',character.appearance+' · '+character.outfit);
+   if(character.referenceImageUri)
+    node(info,'p','small','📌 Эталон сохранён в библиотеке. Подключение к генератору изображений — отдельный следующий этап.');
    const change=node(info,'button','council-button','✎ Исправить паспорт');
    const editBox=node(info,'div','brain-row');editBox.hidden=true;
    const editLook=node(editBox,'textarea','council-input');editLook.value=character.appearance;
@@ -916,7 +918,21 @@ function render(api) {
       director.assignSceneCast(story.id,scene.number,ids);
       state.notice='✅ Сцена '+scene.number+' закреплена за '+ids.length+' персонажем(ами).';
       state.error='';render(api);
-     }catch(e){state.error=e?.message||String(e);render(api);}
+      if(scene.imageUri&&actors.length===1&&
+       /^content:\/\/media\/[^/]+\/images\/media\/\d+$/i.test(scene.imageUri)){
+     const referenceButton=node(castBox,'button','council-button','📌 Сохранить этот PNG как эталон героя');
+     referenceButton.disabled=!canEdit();
+     referenceButton.onclick=()=>{
+      if(!confirm('Закрепить это изображение как эталон для будущих серий? Эта версия NOVA сохраняет ссылку, но ещё НЕ использует PNG как вход для генератора.'))return;
+      try{
+       const saved=cast.setReference(story.seriesId,actors[0],scene.imageUri);
+       state.notice='✅ Изображение сохранено как эталон '+saved.name+
+        '. Само сходство лиц пока не гарантируется.';
+       state.error='';render(api);
+      }catch(e){state.error=e?.message||String(e);render(api);}
+     };
+    }
+   }catch(e){state.error=e?.message||String(e);render(api);}
     };
    }
    const voiceDetails=node(row,'details','nova-more');
