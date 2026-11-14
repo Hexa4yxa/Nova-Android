@@ -175,8 +175,7 @@ function sceneMentionsName(text,name) {
    if(stem.length>=4){token=stem;suffix='[а-яёіїєґ]{0,4}';}
   }
  }
- const escaped=token.replace(/[.*+?^${}()|[\]\\]/g,'\\// A single series bible spans episodes. Each episode captures an immutable
-// cast snapshot. Scene casting is editable only BEFORE a costly render.');
+ const escaped=token.replace(/[^a-z0-9а-яёіїєґ ]/giu,'');
  return new RegExp('(^|[^\\p{L}\\p{N}])'+escaped+suffix+'(?=$|[^\\p{L}\\p{N}])','iu').test(text);
 }
 function sceneHasDouble(beat,actor) {
