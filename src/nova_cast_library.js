@@ -37,7 +37,11 @@ function normalizeCharacter(data,id){
  if(appearance.length<15||!english(appearance))throw Error('Внешность: 15–150 символов по-английски для SD1.5.');
  if(outfit.length<5||!english(outfit))throw Error('Одежда: 5–110 символов по-английски для SD1.5.');
  // Store the complete canonical appearance, not just one scene's cropped prompt.
- return {id,name,role,appearance,outfit};
+ const referenceImageUri=clean(data?.referenceImageUri,220);
+ if(referenceImageUri&&!/^content:\/\/media\/[^/]+\/images\/media\/\d+$/i.test(referenceImageUri))
+  throw Error('Эталон должен быть сохранённым PNG из Галереи NOVA.');
+ return {id,name,role,appearance,outfit,
+  ...(referenceImageUri?{referenceImageUri}:{})};
 }
 function addCharacter(seriesId,data){
  const items=read(),series=items.find(x=>x.id===seriesId);
@@ -60,6 +64,17 @@ function updateCharacter(seriesId,characterId,data){
  series.characters[index]=character;
  if(!write(items))throw Error('Не удалось обновить персонажа.');
  return copy(character);
+}
+function setReference(seriesId,characterId,imageUri){
+ const uri=clean(imageUri,220);
+ if(!/^content:\/\/media\/[^/]+\/images\/media\/\d+$/i.test(uri))
+  throw Error('Этот кадр не сохранён в Галерее NOVA.');
+ const items=read(),series=items.find(x=>x.id===seriesId);
+ const actor=series?.characters.find(x=>x.id===characterId);
+ if(!actor)throw Error('Персонаж не найден.');
+ actor.referenceImageUri=uri;
+ if(!write(items))throw Error('Не удалось сохранить эталон.');
+ return copy(actor);
 }
 function anchor(character){
  if(!character)return '';
@@ -94,6 +109,6 @@ function mergeBackup(series){
  return {added:additional.length,total:items.length+additional.length};
 }
 root.NovaCastLibrary=Object.freeze({
- read,createSeries,addCharacter,updateCharacter,anchor,snapshot,validateBackup,mergeBackup,roles:ROLES
+ read,createSeries,addCharacter,updateCharacter,setReference,anchor,snapshot,validateBackup,mergeBackup,roles:ROLES
 });
 })(typeof window!=='undefined'?window:globalThis);
