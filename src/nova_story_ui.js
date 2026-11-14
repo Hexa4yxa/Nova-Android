@@ -209,6 +209,14 @@ function render(api) {
   };
   node(heading,'div','council-heading',story.title);
   const remaining=story.scenes.filter(scene=>!scene.imageUri);
+  // Based on real native timings; older projects have no measurements.
+  const measured=story.scenes.filter(scene=>Number(scene.modelLoadMs)>0||Number(scene.samplingMs)>0);
+  if(measured.length){
+   const loading=measured.reduce((sum,scene)=>sum+Math.max(0,Number(scene.modelLoadMs)||0),0);
+   const sampling=measured.reduce((sum,scene)=>sum+Math.max(0,Number(scene.samplingMs)||0),0);
+   node(storyBox,'p','small','⏱ Диагностика '+measured.length+' кадр.: загрузка SD1.5 '+(loading/60000).toFixed(1)+
+    ' мин · рисование CPU '+(sampling/60000).toFixed(1)+' мин. Измерено на телефоне.');
+  }
   node(storyBox,'p','small','Кадры: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
    ' · Идея: '+(story.idea||'').slice(0,115)+((story.idea||'').length>115?'…':''));
   const commands=node(storyBox,'div','brain-row');
@@ -907,9 +915,9 @@ function render(api) {
    }
    const progress=node(row,'p','small','');
    const draw=node(row,'button','council-button','🎨 Создать кадр '+scene.number+' · 512×512');
-   draw.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
+   draw.disabled=!!scene.imageUri||state.creating||state.drawing||state.motionBusy||isBusy();
    draw.onclick=async()=>{
-    if(state.drawing||state.creating||state.motionBusy||isBusy())return;
+    if(scene.imageUri||state.drawing||state.creating||state.motionBusy||isBusy())return;
     if(!confirm('Нарисовать сцену '+scene.number+'? Сейчас на CPU это может занять около 20 минут. Качество и модель останутся прежними.'))return;
     state.drawing=true;draw.disabled=true;
     try{
@@ -918,15 +926,28 @@ function render(api) {
       (typeof generateWithAnchor==='function'?generateWithAnchor:()=>Promise.reject(Error('Нужен модуль img2img'))):
       generate;
      const result=await renderFrame(scene.prompt,text=>{progress.textContent=text},scene,story);
-     scene.imageUri=result.imageUri||'saved';
+     if(result?.saved!==true||typeof result.imageUri!=='string'||
+        !/^content:\/\/media\/\S+$/i.test(result.imageUri))
+      throw Error('Android не подтвердил адрес PNG в Галерее. Кадр не отмечен готовым.');
+     // Read the current saved project: never overwrite changes made after
+     // this UI was opened (other scenes, cast, or voice settings).
+     const latest=director.read();
+     const stored=latest.find(item=>item.id===story.id);
+     const target=stored?.scenes.find(item=>item.number===scene.number);
+     if(!target||target.imageUri)
+      throw Error('Проект изменился во время рисования. PNG остаётся в Галерее; проверь сохранённые кадры.');
+     scene.imageUri=result.imageUri;
      scene.renderSeconds=Number(result.elapsedSeconds)||0;
      scene.modelLoadMs=Number(result.modelLoadMs)||0;
      scene.samplingMs=Number(result.samplingMs)||0;
      scene.referenceApplied=!!result.referenceApplied;
-     if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
-     if(!director.write(director.read().map(item=>item.id===story.id?story:item))) {
+     Object.assign(target,{imageUri:scene.imageUri,renderSeconds:scene.renderSeconds,
+      modelLoadMs:scene.modelLoadMs,samplingMs:scene.samplingMs,
+      referenceApplied:scene.referenceApplied});
+     if(!director.write(latest)) {
       throw Error('Кадр создан, но не удалось обновить историю. PNG сохранён в Галерее.');
      }
+     if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
      state.notice='✅ Кадр '+scene.number+' создан и сохранён в Галерее.';
     }catch(e){state.error=e?.message||String(e)}
     finally{state.drawing=false;render(api);}
