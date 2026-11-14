@@ -143,7 +143,8 @@ std::vector<uint8_t> copy_rgb(sd_image_t img, int size) {
 extern "C" JNIEXPORT jbyteArray JNICALL
 NOVA_JNI(nativeGenerate)(
     JNIEnv* env, jobject /*self*/, jstring modelPath,
-    jstring prompt, jstring negativePrompt, jint size, jint steps, jlong seed) {
+    jstring prompt, jstring negativePrompt, jint size, jint steps, jlong seed,
+    jbyteArray initRgb, jfloat denoiseStrength) {
     try {
         RunningFlag guard;
         if (!modelPath || !prompt || !negativePrompt)
@@ -152,6 +153,8 @@ NOVA_JNI(nativeGenerate)(
             throw std::runtime_error("Разрешены размеры 256 или 512");
         if (steps < 1 || steps > 30)
             throw std::runtime_error("Количество шагов вне диапазона");
+        if (initRgb && (denoiseStrength < 0.25f || denoiseStrength > 0.85f))
+            throw std::runtime_error("img2img strength разрешён от 0.25 до 0.85");
 
         const std::string path = UtfChars(env, modelPath).str();
         const std::string text = UtfChars(env, prompt).str();
@@ -200,6 +203,23 @@ NOVA_JNI(nativeGenerate)(
         image_params.sample_params.sample_steps = steps;
         image_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
         image_params.sample_params.scheduler = DISCRETE_SCHEDULER;
+        // Optional REAL img2img. JNI owns the RGB buffer until synchronous
+        // generate_image() returns. Never pass a Java array pointer directly.
+        std::vector<uint8_t> reference_pixels;
+        if (initRgb) {
+            const jsize expected = static_cast<jsize>(size * size * 3);
+            if (env->GetArrayLength(initRgb) != expected)
+                throw std::runtime_error("Неверный размер эталонного RGB кадра");
+            reference_pixels.resize(static_cast<size_t>(expected));
+            env->GetByteArrayRegion(initRgb, 0, expected,
+                reinterpret_cast<jbyte*>(reference_pixels.data()));
+            if (env->ExceptionCheck()) return nullptr;
+            image_params.init_image.width = static_cast<uint32_t>(size);
+            image_params.init_image.height = static_cast<uint32_t>(size);
+            image_params.init_image.channel = 3;
+            image_params.init_image.data = reference_pixels.data();
+            image_params.strength = denoiseStrength;
+        }
 
         Result result;
         const auto sample_started = std::chrono::steady_clock::now();
