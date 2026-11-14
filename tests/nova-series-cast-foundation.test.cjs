@@ -139,6 +139,24 @@ test('old projects remain valid, backups include series cast and merge without d
  assert.throws(()=>fresh.director.mergeBackup(broken),/Неверная библиотека/);
  assert.equal(JSON.stringify(fresh.director.read()),before);
 });
+test('optional reference PNG is saved in cast bible but does not falsely trigger img2img',()=>{
+ const a=build();
+ const uri='content://media/external/images/media/4242';
+ assert.throws(()=>a.cast.setReference(a.series.id,a.hero.id,'file:///sdcard/Download/image.png'),
+  /не сохранён/);
+ const saved=a.cast.setReference(a.series.id,a.hero.id,uri);
+ assert.equal(saved.referenceImageUri,uri);
+ const edited=a.cast.updateCharacter(a.series.id,a.hero.id,{...saved,
+  outfit:'dark long coat and a bright red scarf'});
+ assert.equal(edited.referenceImageUri,uri);
+ const snap=a.cast.snapshot(a.series.id,a.hero.id);
+ assert.equal(snap.characters[0].referenceImageUri,uri);
+ const story=a.director.parse(JSON.stringify(base),concept,'comic',snap);
+ assert.doesNotMatch(story.scenes[0].prompt,/content:\/\/media/);
+ const backup=JSON.parse(a.director.exportBackup());
+ assert.equal(backup.seriesLibrary[0].characters[0].referenceImageUri,uri);
+});
+
 test('UI uses cast library on serial episodes; performance metrics survive project persistence',()=>{
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
  const chat=fs.readFileSync('src/nova_story_chat.js','utf8');
