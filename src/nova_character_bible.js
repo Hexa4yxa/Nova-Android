@@ -96,5 +96,5 @@ function mergeBackup(part){
  return {series:newSeries.length,characters:newChars.length};
 }
 root.NovaCharacterBible=Object.freeze({read,createSeries,addCharacter,setReference,
- getCast,getSeries,snapshot,mergeBackup});
+ getCast,getSeries,snapshot,validateBackup:check,mergeBackup});
 })(typeof window!=='undefined'?window:globalThis);
