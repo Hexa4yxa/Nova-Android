@@ -116,27 +116,37 @@
  // The Android WebView can be recreated after a long CPU render. Recover by
  // reading the durable Projects checkpoint, not by regenerating the story.
  async function renderRemaining({director,story,generate,onStatus,onFrame,isCancelled}){
-  let completed=story.scenes.filter(scene=>!!scene.imageUri).length;
-  for(const scene of story.scenes){
-   // Ignore already exported PNGs. Never spend another hour on finished frames.
+  const storyId=story.id;
+  const sceneNumbers=story.scenes.map(scene=>scene.number);
+  // A render can last many minutes. Refresh before EVERY frame: another screen
+  // may have completed a later PNG or edited its prompt while we were busy.
+  const latest=()=>{
+   const current=director.read().find(item=>item.id===storyId);
+   if(!current)throw Error('Проект был удалён во время рисования. PNG остаются в Галерее.');
+   return current;
+  };
+  for(const number of sceneNumbers){
+   const current=latest();
+   const scene=current.scenes.find(item=>item.number===number);
+   if(!scene)throw Error('Сцена '+number+' изменилась. Генерация остановлена без удаления кадров.');
+   const completed=current.scenes.filter(item=>!!item.imageUri).length;
+   // Never rerender an externally completed frame based on a stale snapshot.
    if(scene.imageUri)continue;
-   if(isCancelled())return {cancelled:true,completed,total:story.scenes.length,story};
-   onStatus('🎨 Рисую кадр '+scene.number+' из '+story.scenes.length+'...');
+   if(isCancelled())return {cancelled:true,completed,total:current.scenes.length,story:current};
+   onStatus('🎨 Рисую кадр '+number+' из '+current.scenes.length+'...');
    const result=await generate(scene.prompt,progress=>{
-    onStatus('Кадр '+scene.number+' из '+story.scenes.length+': '+progress);
-   },scene,story);
-   if(!savedImageUri(result))throw Error('Генератор не подтвердил сохранение PNG кадра '+scene.number+' в Галерее. Готовые кадры не изменены.');
-   saveScene(director,story.id,scene.number,result,scene.prompt);
-   // Keep this in-memory scene current too, for follow-up iteration guards.
-   scene.imageUri=result.imageUri;
-   scene.renderSeconds=Number(result.elapsedSeconds)||0;
-   scene.modelLoadMs=Number(result.modelLoadMs)||0;
-   scene.samplingMs=Number(result.samplingMs)||0;
-   scene.referenceApplied=!!result.referenceApplied;
-   completed++;
-   onFrame({scene,result,completed,total:story.scenes.length,story});
+    onStatus('Кадр '+number+' из '+current.scenes.length+': '+progress);
+   },scene,current);
+   if(!savedImageUri(result))throw Error('Генератор не подтвердил сохранение PNG кадра '+number+' в Галерее. Готовые кадры не изменены.');
+   saveScene(director,storyId,number,result,scene.prompt);
+   const saved=latest();
+   const savedScene=saved.scenes.find(item=>item.number===number);
+   const savedCount=saved.scenes.filter(item=>!!item.imageUri).length;
+   onFrame({scene:savedScene,result,completed:savedCount,total:saved.scenes.length,story:saved});
   }
-  return {cancelled:false,completed,total:story.scenes.length,story};
+  const finished=latest();
+  return {cancelled:false,completed:finished.scenes.filter(item=>!!item.imageUri).length,
+   total:finished.scenes.length,story:finished};
  }
  async function resumeExisting(options){
   const {storyId,generate,onStatus=()=>{},onFrame=()=>{},
