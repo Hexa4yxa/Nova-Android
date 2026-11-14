@@ -94,6 +94,25 @@ test('projects and backup retain art preset and existing PNGs, without rewriting
  assert.equal(d.read()[1].scenes[1].imageUri,styled.scenes[1].imageUri);
  assert.equal(d.read()[1].styleId,'painting');
 });
+test('SD1.5 does not turn the chosen comic or painterly preset back into a photograph',()=>{
+ const html=fs.readFileSync('src/index.html','utf8');
+ const js=html.match(/<script>([\s\S]*?)<\/script>/)?.[1]||'';
+ const start=js.indexOf('function imageNegativePrompt(prompt)');
+ const end=js.indexOf('async function executeImageGeneration(',start);
+ assert.ok(start>=0&&end>start);
+ const functions=vm.runInNewContext(js.slice(start,end)+'\n({imageEnhancedPrompt,imageNegativePrompt})');
+ for(const style of [
+  'cinematic graphic novel, bold ink outlines',
+  'anime film illustration, clean line art',
+  'painterly storybook illustration, soft brush textures'
+ ]){
+  const actual=functions.imageEnhancedPrompt('A woman enters a lighthouse, '+style);
+  assert.doesNotMatch(actual,/photorealistic cinematic photograph/);
+  assert.match(functions.imageNegativePrompt(actual),/low quality, ugly/);
+ }
+ assert.match(functions.imageEnhancedPrompt('A dog in a park'),/photorealistic cinematic photograph/);
+});
+
 test('the editor chooses art style once, and does not change rendered old frames',()=>{
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
  const chat=fs.readFileSync('src/nova_story_chat.js','utf8');
