@@ -152,8 +152,9 @@ test('offline UI exposes one shared cast library and opt-in native img2img safel
 test('timing diagnostics are persisted instead of claiming artificial speedup',()=>{
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
  const chat=fs.readFileSync('src/nova_story_chat.js','utf8');
- assert.match(ui,/scene\.modelLoadMs=Number\(result\.modelLoadMs\)/);
- assert.match(ui,/scene\.samplingMs=Number\(result\.samplingMs\)/);
+ assert.match(ui,/modelLoadMs:Number\(result\.modelLoadMs\)/);
+ assert.match(ui,/samplingMs:Number\(result\.samplingMs\)/);
+ assert.match(ui,/Object\.assign\(target,update\)/);
  assert.match(chat,/scene\.modelLoadMs=Number\(result\.modelLoadMs\)/);
  assert.match(chat,/scene\.samplingMs=Number\(result\.samplingMs\)/);
 });
