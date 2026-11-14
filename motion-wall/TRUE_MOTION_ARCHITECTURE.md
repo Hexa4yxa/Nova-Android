@@ -32,4 +32,4 @@ Input: one photograph of the user's actual car. Output: 4–6 seconds of generat
 
 ### Current status
 
-**Design decision recorded; NO true-motion AI pipeline or video wallpaper player implemented yet.** Existing Canvas-based v0.2 and v0.3 source-only work stays distinct from true-motion task. Need actual player/source integration and real owner tests before APK release.
+**MP4 video wallpaper foundation implemented in source, NOT accepted on device.** VideoClipStore imports/validates a locally chosen MP4 (1–30 seconds, up to 50 MB), and MotionVideoWallpaperService loops it with Android MediaPlayer and pauses it when invisible. MainActivity exposes separate Video Wallpaper buttons, and the old still-photo service stays available. Android compilation on this source passed initial CI for commit `fd21d97d11`. **No image-to-video AI generation, cloud provider, server proxy, billing or true-photo-animation is connected yet.** The revised playback lifecycle is still under CI; must get owner phone acceptance for video playback before releasing a single signed v0.3 update. Never suggest the old effects are true car motion.
