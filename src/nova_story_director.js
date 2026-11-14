@@ -238,7 +238,8 @@ function exportBackup() {
  return JSON.stringify({
    format:'NOVA_STORIES_V1',version:1,
    exportedAt:new Date().toISOString(),
-   stories:read()
+   stories:read(),
+   ...(root.NovaCharacterBible?{characterBible:root.NovaCharacterBible.read()}:{})
  });
 }
 function validBackupStory(item) {
@@ -258,6 +259,12 @@ function mergeBackup(payload) {
     !Array.isArray(archive.stories) || archive.stories.length>2500 ||
     !archive.stories.every(validBackupStory))
    throw Error('Неверный формат копии NOVA. Ничего не изменено.');
+ // Old V1 archives without a character bible remain supported.
+ const library=root.NovaCharacterBible;
+ if(archive.characterBible){
+  if(!library?.validateBackup)throw Error('Библия сериала недоступна, восстановление отменено.');
+  library.validateBackup(archive.characterBible);
+ }
  const existing=read();
  const seen=new Set(existing.map(item=>item.id));
  const additions=[];
@@ -271,6 +278,13 @@ function mergeBackup(payload) {
  // untouched on a parse error, invalid data, or storage quota failure.
  if(additions.length && !write(existing.concat(additions)))
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
+ try {
+  if(archive.characterBible)library.mergeBackup(archive.characterBible);
+ } catch(e) {
+  // Best-effort rollback if the separate character-library write fails.
+  if(additions.length)write(existing);
+  throw e;
+ }
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
 root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,bindSeries,setSceneCast,read,write,exportBackup,mergeBackup});
