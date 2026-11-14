@@ -20,6 +20,60 @@ public final class NightRideRenderer {
     private final RectF rect = new RectF();
     private int gradientW = -1, gradientH = -1;
     private Shader gradient;
+    // Background is static on purpose. Re-scaling a full 1800px car photo
+    // TWICE on every Canvas frame was causing launcher/wallpaper stutter.
+    // Cache only the low-contrast background at reduced 640px width.
+    private Bitmap backgroundCache;
+    private Bitmap backgroundSource;
+    private int backgroundW = -1, backgroundH = -1;
+    private boolean backgroundAllocationFailed;
+
+    public void release() {
+        if (backgroundCache != null && !backgroundCache.isRecycled())
+            backgroundCache.recycle();
+        backgroundCache = null;
+        backgroundSource = null;
+        backgroundW = backgroundH = -1;
+        backgroundAllocationFailed = false;
+    }
+
+    private void drawCachedBackground(Canvas canvas, int w, int h, Bitmap image) {
+        if (image != backgroundSource || w != backgroundW || h != backgroundH) {
+            release();
+            backgroundSource = image;
+            backgroundW = w;
+            backgroundH = h;
+            float scale = Math.min(1f, 640f / Math.max(1, w));
+            int cw = Math.max(1, Math.round(w * scale));
+            int ch = Math.max(1, Math.round(h * scale));
+            try {
+                backgroundCache = Bitmap.createBitmap(cw, ch, Bitmap.Config.RGB_565);
+                Canvas staging = new Canvas(backgroundCache);
+                staging.drawColor(Color.rgb(8, 12, 26));
+                float cover = MotionMath.coverScale(image.getWidth(), image.getHeight(), cw, ch)*1.12f;
+                float bw = image.getWidth()*cover, bh = image.getHeight()*cover;
+                rect.set((cw-bw)*.5f,(ch-bh)*.5f,(cw+bw)*.5f,(ch+bh)*.5f);
+                photoPaint.setAlpha(145);
+                staging.drawBitmap(image,null,rect,photoPaint);
+                photoPaint.setAlpha(255);
+                brush.setShader(null);
+                brush.setColor(Color.argb(170,4,8,23));
+                staging.drawRect(0f,0f,cw,ch,brush);
+            } catch (OutOfMemoryError error) {
+                if (backgroundCache != null && !backgroundCache.isRecycled())
+                    backgroundCache.recycle();
+                backgroundCache = null;
+                backgroundAllocationFailed = true;
+            }
+        }
+        if (backgroundCache != null && !backgroundCache.isRecycled()) {
+            photoPaint.setAlpha(255);
+            rect.set(0f,0f,w,h);
+            canvas.drawBitmap(backgroundCache,null,rect,photoPaint);
+        } else if (backgroundAllocationFailed) {
+            canvas.drawColor(Color.rgb(8,12,26));
+        }
+    }
 
     public void draw(Canvas canvas, int w, int h, Bitmap image, float phase) {
         draw(canvas, w, h, image, phase, new MotionSettings(MotionSettings.NIGHT, 65));
@@ -44,20 +98,9 @@ public final class NightRideRenderer {
         float iw = image.getWidth(), ih = image.getHeight();
         float strength = settings.strength / 100f;
 
-        // Fullscreen environmental duplicate; its only purpose is to eliminate
-        // letterbox bars. Keep the car itself entirely visible on the top layer.
-        float cover = MotionMath.coverScale((int)iw,(int)ih,w,h) * 1.12f;
-        float bgw = iw * cover, bgh = ih * cover;
-        float bx = (w - bgw)/2f + MotionMath.wave(phase)*w*.012f*strength;
-        float by = (h - bgh)/2f + MotionMath.wave(phase+.25f)*h*.009f*strength;
-        rect.set(bx,by,bx+bgw,by+bgh);
-        photoPaint.setAlpha(115);
-        canvas.drawBitmap(image,null,rect,photoPaint);
-        photoPaint.setAlpha(255);
-
-        brush.setColor(Color.argb(155,4,8,23));
-        brush.setShader(null);
-        canvas.drawRect(0,0,w,h,brush);
+        // Preserve dark full-screen scenery, but only resample it on a new
+        // image or surface size. Foreground remains live, bright and uncropped.
+        drawCachedBackground(canvas,w,h,image);
 
         // FIT = important on portrait wallpaper from landscape car photos.
         // A small oscillation creates motion without cutting off the bumper.
