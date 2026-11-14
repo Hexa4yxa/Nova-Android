@@ -126,3 +126,35 @@ test('late CPU render never replaces an already completed frame or an edited sce
  assert.equal(x.director.read()[0].scenes[1].prompt,changed[0].scenes[1].prompt);
  assert.equal(x.director.read()[0].scenes[0].imageUri,'content://media/external/images/media/800');
 });
+
+test('concurrently completed later frames are skipped and changed future prompts are refreshed',async()=>{
+ const x=setup();
+ let finishFirst;
+ const waiting=new Promise(resolve=>{finishFirst=resolve;});
+ const calls=[],onFrameCounts=[];
+ const task=x.chat.resumeExisting({storyId:x.story.id,
+  generate:async(prompt,progress,scene)=>{
+   calls.push({number:scene.number,prompt});
+   if(scene.number===1)return waiting;
+   return {saved:true,imageUri:'content://media/external/images/media/903'};
+  },
+  onFrame:({completed})=>onFrameCounts.push(completed)
+ });
+ // Another app screen saves the second shot and edits the third while the
+ // first frame is spending minutes inside the native SD image engine.
+ const current=x.director.read();
+ current[0].scenes[1].imageUri='content://media/external/images/media/902';
+ current[0].scenes[2].prompt='A revised third shot, approved while the renderer was busy, with a different focal point.';
+ assert.ok(x.director.write(current));
+ finishFirst({saved:true,imageUri:'content://media/external/images/media/901'});
+ const done=await task;
+ assert.equal(done.completed,3);
+ assert.deepEqual(calls.map(c=>c.number),[1,3]);
+ assert.equal(calls[1].prompt,current[0].scenes[2].prompt);
+ assert.deepEqual(onFrameCounts,[2,3]);
+ assert.deepEqual(Array.from(x.director.read()[0].scenes,s=>s.imageUri),[
+  'content://media/external/images/media/901',
+  'content://media/external/images/media/902',
+  'content://media/external/images/media/903'
+ ]);
+});
