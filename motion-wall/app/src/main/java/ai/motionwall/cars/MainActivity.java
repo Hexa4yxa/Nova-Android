@@ -229,6 +229,7 @@ public final class MainActivity extends Activity {
         }
         @Override protected void onDetachedFromWindow(){
             attached=false;removeCallbacks(tick);
+            renderer.release();
             if(image!=null&&!image.isRecycled())image.recycle();image=null;
             super.onDetachedFromWindow();
         }
