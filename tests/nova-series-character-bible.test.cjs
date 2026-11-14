@@ -103,6 +103,28 @@ test('existing legacy projects, gallery PNG and voice remain unchanged after ser
  const archive=director.exportBackup();
  assert.equal(JSON.parse(archive).stories[0].scenes[0].voiceText,'Где ты?');
 });
+test('story backup restores shared series cast without clobbering existing people',()=>{
+ const {bible,director,memory}=setup();
+ const {series,hero}=createCast(bible);
+ const first=director.parse(JSON.stringify(frames),original,'comic');
+ director.bindSeries(first,bible.snapshot(series.id));
+ first.id='episode-one';
+ assert.equal(director.write([first]),true);
+ const archive=director.exportBackup();
+ assert.equal(JSON.parse(archive).characterBible.characters.length,3);
+ memory.delete('nova_series_character_bible_v1');
+ assert.equal(bible.read().characters.length,0);
+ assert.equal(director.mergeBackup(archive).added,0);
+ assert.equal(bible.getCast(series.id).length,3);
+ assert.equal(bible.getCast(series.id)[0].id,hero.id);
+ const before=JSON.stringify(bible.read());
+ assert.equal(bible.mergeBackup(JSON.parse(archive).characterBible).characters,0);
+ assert.equal(JSON.stringify(bible.read()),before);
+ const bad=JSON.stringify({...JSON.parse(archive),characterBible:{version:1,series:[],characters:[{id:'bad'}]}});
+ assert.throws(()=>director.mergeBackup(bad),/библи|Библи|Неверные данные/);
+ assert.equal(JSON.stringify(bible.read()),before);
+});
+
 test('offline UI exposes one shared cast library and opt-in native img2img safely',()=>{
  const html=fs.readFileSync('src/index.html','utf8');
  const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
