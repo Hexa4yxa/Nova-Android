@@ -1,6 +1,7 @@
 package ai.motionwall.cars;
 
 import android.media.MediaPlayer;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.service.wallpaper.WallpaperService;
@@ -17,10 +18,26 @@ public final class MotionVideoWallpaperService extends WallpaperService {
 
     private final class VideoEngine extends Engine {
         private final Handler handler=new Handler(Looper.getMainLooper());
+        private final SharedPreferences prefs=getSharedPreferences(PhotoStore.PREFS,MODE_PRIVATE);
+        private final SharedPreferences.OnSharedPreferenceChangeListener listener=(preferences,key)->{
+            if(VideoClipStore.VIDEO_KEY.equals(key)) {
+                handler.post(()->{
+                    if(destroyed)return;
+                    // A new locally selected MP4 changes the active wallpaper
+                    // without clearing data or reinstalling a new service.
+                    closePlayer();
+                    startIfVisible();
+                });
+            }
+        };
         private MediaPlayer player;
         private boolean visible, surfaceReady, destroyed;
         private int session;
 
+        @Override public void onCreate(SurfaceHolder holder) {
+            super.onCreate(holder);
+            prefs.registerOnSharedPreferenceChangeListener(listener);
+        }
         @Override public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
             surfaceReady=true;
@@ -81,6 +98,7 @@ public final class MotionVideoWallpaperService extends WallpaperService {
             destroyed=true;
             closePlayer();
             handler.removeCallbacksAndMessages(null);
+            prefs.unregisterOnSharedPreferenceChangeListener(listener);
             super.onDestroy();
         }
     }
