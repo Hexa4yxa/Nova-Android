@@ -1,7 +1,7 @@
 /* NOVA Story UI. Uses the existing local Gemma, SD1.5 and Gallery. No external service. */
 (function(root){
 'use strict';
-const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null};
+const state={creating:false,drawing:false,backupBusy:false,backupMessage:'',idea:'',councilBrief:'',error:'',notice:'',projectQuery:'',motionBusy:false,motionStoryId:'',motionStatus:'',motionStop:null,autoFinishStoryId:'',voiceChoices:null,artStyleId:'comic',seriesId:''};
 const previews={};
 function node(parent,tag,cls,copy) {
  const n=document.createElement(tag);
@@ -10,8 +10,19 @@ function node(parent,tag,cls,copy) {
  parent.appendChild(n);
  return n;
 }
+function prefillCouncil(task,finalPlan) {
+  if(state.creating||state.drawing||state.motionBusy||state.backupBusy)
+    throw Error('Дождись завершения текущей задачи в студии.');
+  const idea=String(task||'').trim().replace(/\s+/g,' ').slice(0,380);
+  if(idea.length<12)throw Error('Не удалось перенести короткую идею.');
+  state.idea=idea;
+  state.councilBrief=String(finalPlan||'').trim().replace(/\s+/g,' ').slice(0,900);
+  state.error='';
+  state.notice='✅ Замысел и решение совета перенесены. Проверь описание и нажми «Придумай 6 сцен». Картинки пока не создаются.';
+  return true;
+}
 function render(api) {
- const {content,brain,generate,resumeStory,isBusy}=api;
+ const {content,brain,generate,generateWithAnchor,resumeStory,isBusy}=api;
  const director=root.NovaStoryDirector;
  content.replaceChildren();
  const shell=node(content,'section','panel');
@@ -66,6 +77,29 @@ function render(api) {
  editor.maxLength=380;
  editor.value=state.idea;
  editor.oninput=()=>{state.idea=editor.value};
+ // A simple per-project choice, not a model picker or a global Android setting.
+ const styleRow=node(shell,'div','brain-row');
+ node(styleRow,'p','small','🎨 Единый стиль всех шести кадров');
+ const artPick=node(styleRow,'select','council-input');
+ artPick.setAttribute('aria-label','Стиль рисования новой истории');
+ for(const preset of director.artStyles()){
+  const item=node(artPick,'option','',preset.label+' · '+preset.hint);
+  item.value=preset.id;
+ }
+ artPick.value=state.artStyleId;
+ artPick.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
+ artPick.onchange=()=>{state.artStyleId=artPick.value;};
+ node(styleRow,'p','small','Стиль и внешность героя закрепляются в новой истории. Уже созданные кадры не меняются.');
+ // One persistent cast library serves many episodes, not one-off prompts.
+ if(root.NovaSeriesUI?.render)root.NovaSeriesUI.render(shell,{
+  director,selectedSeriesId:state.seriesId,styleId:state.artStyleId,
+  onSelect:id=>{
+   state.seriesId=id;
+   const series=id?root.NovaCharacterBible.getSeries(id):null;
+   if(series)state.artStyleId=series.styleId;
+   render(api);
+  }
+ });
  const button=node(shell,'button','council-button','🧠 NOVA, придумай 6 сцен');
  const feedback=node(shell,'p','small',state.error?'⚠ '+state.error:state.notice);
  button.disabled=state.creating||state.drawing||state.motionBusy||isBusy()||!brain;
@@ -77,22 +111,35 @@ function render(api) {
   state.error='';
   feedback.textContent='🧠 Gemma готовит последовательность сцен и собственные промпты...';
   try{
-   const question=director.ideaRequest(state.idea,3);
+   const seriesCast=state.seriesId?root.NovaCharacterBible.snapshot(state.seriesId):null;
+   if(seriesCast&&!seriesCast.cast.length)
+    throw Error('В выбранном сериале ещё нет персонажей. Добавь хотя бы одного.');
+   const chosenStyle=seriesCast?.styleId||state.artStyleId;
+   const question=director.ideaRequest(state.idea,3,state.councilBrief,chosenStyle,seriesCast);
    // Two small Gemma requests: 6 scenes in one 512-token answer would truncate.
    // No new models and no image generation until the plan is safely saved.
-   const status=await brain.status();
-   if(status.engine!=='ModelReady')await brain.prepare();
+   // Share the asynchronous native loader; do not race "Initializing".
+   if(root.NovaStoryChat?.readyBrain){
+    const ready=await root.NovaStoryChat.readyBrain(brain,message=>{feedback.textContent=message;});
+    if(!ready)throw Error('Запуск модели остановлен.');
+   }else{
+    const status=await brain.status();
+    if(status.engine!=='ModelReady')await brain.prepare();
+   }
    const response=await brain.chat({message:question,maxTokens:512});
-   const first=director.parse(response?.answer,state.idea);
+   const first=director.parse(response?.answer,state.idea,chosenStyle);
    feedback.textContent='🧠 Первые три сцены готовы. NOVA продолжает историю (4–6)...';
    const second=await brain.chat({
-    message:director.continuationRequest(state.idea,first),maxTokens:512
+    message:director.continuationRequest(state.idea,first,state.councilBrief,seriesCast),maxTokens:512
    });
    const story=director.appendContinuation(first,second?.answer);
+   if(seriesCast)director.bindSeries(story,seriesCast);
+    if(state.councilBrief)story.councilPlan=state.councilBrief;
    const saved=director.read();
    saved.push(story);
    if(!director.write(saved))throw Error('Нет места для сохранения плана истории на телефоне.');
    state.notice='✅ NOVA подготовила 6 сцен. Промпты готовы, картинки ещё не запущены.';
+    state.councilBrief='';
   }catch(e){state.error=e?.message||String(e);}
   finally{state.creating=false;render(api);}
  };
@@ -162,6 +209,14 @@ function render(api) {
   };
   node(heading,'div','council-heading',story.title);
   const remaining=story.scenes.filter(scene=>!scene.imageUri);
+  // Based on real native timings; older projects have no measurements.
+  const measured=story.scenes.filter(scene=>Number(scene.modelLoadMs)>0||Number(scene.samplingMs)>0);
+  if(measured.length){
+   const loading=measured.reduce((sum,scene)=>sum+Math.max(0,Number(scene.modelLoadMs)||0),0);
+   const sampling=measured.reduce((sum,scene)=>sum+Math.max(0,Number(scene.samplingMs)||0),0);
+   node(storyBox,'p','small','⏱ Диагностика '+measured.length+' кадр.: загрузка SD1.5 '+(loading/60000).toFixed(1)+
+    ' мин · рисование CPU '+(sampling/60000).toFixed(1)+' мин. Измерено на телефоне.');
+  }
   node(storyBox,'p','small','Кадры: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
    ' · Идея: '+(story.idea||'').slice(0,115)+((story.idea||'').length>115?'…':''));
   const commands=node(storyBox,'div','brain-row');
@@ -180,6 +235,22 @@ function render(api) {
   // NOVA does the complete pipeline: missing SD1.5 images (owner-approved),
   // ONE saved physical comic PNG, then an optional panel-by-panel movie.
   // This remains compatible with older 1-3-scene projects and all saved PNGs.
+  // Single deliberate approval, existing resumable comic -> MP4 + voice.
+  const oneFilm=node(commands,'button','council-button','🎬 NOVA, сделай ролик');
+  oneFilm.disabled=!canEdit()||!comic?.build||!motion?.render||
+   (remaining.length>0&&typeof resumeStory!=='function');
+  oneFilm.onclick=async()=>{
+   if(!canEdit()||!comic?.build||!motion?.render)return;
+   const missing=story.scenes.filter(x=>!x.imageUri).length;
+   if(!confirm('NOVA нарисует '+missing+' недостающих кадров, соберёт комикс и MP4 с движением. '+
+    'Если доступен офлайн-голос — добавит озвучку. Один кадр может создаваться десятки минут. '+
+    'Готовые файлы сохраняются. Продолжить?'))return;
+   state.autoFinishStoryId=story.id;
+   if(comicReady){
+    state.autoFinishStoryId='';
+    await readComic.onclick({skipConfirm:true});
+   }else await makeComic.onclick({skipConfirm:true});
+  };
   const comicRow=node(storyBox,'div','brain-row');
   const makeComic=node(comicRow,'button','council-button',
    '📖 NOVA, создай комикс · '+story.scenes.length+' сцен');
@@ -202,7 +273,7 @@ function render(api) {
   const comicProgress=node(storyBox,'p','small','');
   const comicStop=node(comicRow,'button','council-button','■ Остановить');
   comicStop.style.display='none';
-  makeComic.onclick=async()=>{
+  makeComic.onclick=async(options={})=>{
    if(!canEdit()||!comic?.build)return;
    const current=director.read().find(x=>x.id===story.id);
    if(!current)return;
@@ -213,7 +284,7 @@ function render(api) {
     'Готовые кадры повторно не рисуются. Продолжить?':
     'NOVA соберёт один комикс-лист из '+current.scenes.length+
     ' готовых PNG и сохранит в Галерею. Исходные картинки не изменятся. Продолжить?';
-   if(!confirm(warning))return;
+   if(!options?.skipConfirm && !confirm(warning))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    state.error='';makeComic.disabled=true;readComic.disabled=true;
    comicStop.style.display='';
@@ -251,6 +322,7 @@ function render(api) {
     state.notice='✅ NOVA создала один комикс-лист из '+fresh.scenes.length+
      ' панелей. Открой его или запусти чтение в MP4.';
    }catch(e){
+    state.autoFinishStoryId='';
     state.error='Комикс: '+(e?.message||String(e))+
      '. Уже созданные кадры остаются в Галерее и проекте.';
    }finally{
@@ -258,9 +330,9 @@ function render(api) {
     comicStop.style.display='none';render(api);
    }
   };
-  readComic.onclick=async()=>{
+  readComic.onclick=async(options={})=>{
    if(!canEdit()||!comicReady||!motion?.render)return;
-   if(!confirm('NOVA откроет панели комикса по очереди, добавит движение камеры, дождь, огонь и туман. Если на телефоне есть офлайн-голос, добавит озвучку и звуки в MP4. Создать?'))return;
+   if(!options?.skipConfirm && !confirm('NOVA соберёт ролик из сохранённых кадров, напишет цельный сценарий и добавит чистый офлайн-голос. Без шипения, шумового дождя и автоматических звуков. Создать?'))return;
    state.motionBusy=true;state.motionStoryId=story.id;
    readComic.disabled=true;makeComic.disabled=true;
    comicStop.style.display='';
@@ -273,51 +345,63 @@ function render(api) {
      comicProgress.textContent='🎬 Панель '+Number(progress.done||0)+' из '+story.scenes.length;
     });
     const shots=story.scenes.map((scene,index)=>{
-     const description=(scene.beat+' '+scene.prompt).toLowerCase();
-     let effect='none';
-     if(/дожд|rain|storm/.test(description))effect='rain';
-     else if(/факел|огонь|плам|fire|flame|torch|lantern/.test(description))effect='torch';
-     else if(/туман|дым|mist|fog|smoke/.test(description))effect='fog';
-     else if(/свет|сиян|light|glow|silver/.test(description))effect='glow';
+     // Image PROMPTS are not effects instructions: repeated "rain/storm" used
+     // to trigger synthetic rain overlays on ALL scenes. Default is clean.
+     const allowedEffects=new Set(['rain','torch','fog','glow']);
+     const effect=allowedEffects.has(scene.videoEffect)?scene.videoEffect:'none';
      return {
-      imageUri:story.comicPageUri,panelIndex:index,panelCount:story.scenes.length,
-      plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:4,effect
+      // Export original frame without comic titles/captions; gallery comic page stays intact.
+      imageUri:scene.imageUri,
+      plan:'wide',motion:index%2?'pan-left':'push',durationSeconds:story.scenes.length===6?5:4,effect
      };
     });
     const outcome=await motion.render({shots});
     if(!outcome?.saved||!outcome.videoUri)throw Error('Android не подтвердил MP4.');
     let finalMovie=outcome.videoUri;
     let voiced=false;
+    let narrationDraft=[];
+    let narrationLanguage='';
     let soundNote='Без озвучки: офлайн-голос Android не найден.';
     // Keep the original silent MP4 as fallback. A failed TTS or AAC step
     // must never erase the already-rendered comic or its source frames.
     if(voice?.dubMovie&&voice?.status){
      try{
       comicProgress.textContent='🎙 Проверяю локальные голоса Android...';
-      const speech=await voice.status();
+      const speech=await voice.status({engineId:story.voiceEngineId||''});
       if(speech?.available){
        const narrator=root.NovaComicNarrator;
        if(!narrator?.prepare)throw Error('Нет модуля подготовки понятного текста.');
-       if(brain?.status&&brain?.prepare){
+       if(root.NovaStoryChat?.readyBrain&&brain?.status){
+        await root.NovaStoryChat.readyBrain(brain,message=>{comicProgress.textContent=message;});
+       }else if(brain?.status&&brain?.prepare){
         const ready=await brain.status();
         if(ready.engine!=='ModelReady')await brain.prepare();
        }
        const script=await narrator.prepare(story,speech,brain,message=>{
         comicProgress.textContent=message;
-       });
+       },story.scenes.length===6?5:4);
+       narrationDraft=script.lines.map(line=>line.text);
+       narrationLanguage=script.language;
        comicProgress.textContent='🎙 NOVA озвучивает '+(script.language==='uk'?'украинский':'русский')+
         ' текст и собирает MP4...';
+       // Video visual effects MUST NOT control audio. Most old scene prompts
+       // contained "rain"/"storm" in every image, generating harsh hiss in all shots.
+       // Only an explicit per-scene audioEffect is honored, default is dry voice.
+       const allowedSounds=new Set(['rain','torch','fog','glow']);
        const lines=script.lines.map((line,index)=>({
-        ...line,effect:shots[index].effect
+        ...line,
+        effect:story.enableAudioEffects===true&&
+          allowedSounds.has(story.scenes[index]?.audioEffect)?
+          story.scenes[index].audioEffect:'none'
        }));
        const dubbed=await voice.dubMovie({
-        videoUri:outcome.videoUri,language:script.language,lines
+        videoUri:outcome.videoUri,language:script.language,
+         engineId:story.voiceEngineId||'',voiceId:story.voiceId||'',lines
        });
        if(dubbed?.saved&&dubbed.videoUri){
         finalMovie=dubbed.videoUri;
         voiced=true;
-        soundNote='С озвучкой и звуками · '+(dubbed.distinctCharacterVoice?
-         'найдены разные голоса':'доступен один локальный голос');
+        soundNote='Чистая офлайн-озвучка без автоматического шума · голос '+(dubbed.voice||'Android');
        } else soundNote='Звук не подтверждён, сохранено немое видео.';
       }else soundNote=speech?.detail||soundNote;
      }catch(e){
@@ -330,6 +414,8 @@ function render(api) {
      current.movieUri=finalMovie;
      current.movieSeconds=outcome.seconds;
      current.movieHasAudio=voiced;
+     current.narrationDraft=narrationDraft;
+     current.narrationLanguage=narrationLanguage;
      if(!director.write(items))
       throw Error('MP4 сохранён, но ссылка не записалась в проект.');
     }
@@ -342,6 +428,12 @@ function render(api) {
     render(api);
    }
   };
+  if(state.autoFinishStoryId===story.id && comicReady && !state.motionBusy){
+   state.autoFinishStoryId='';
+   Promise.resolve().then(()=>readComic.onclick({skipConfirm:true})).catch(e=>{
+    state.error='Монтаж комикса: '+(e?.message||String(e));render(api);
+   });
+  }
   if(comicReady)node(storyBox,'p','small','📖 Единый комикс-лист готов: '+story.comicPanels+
    ' панелей · Pictures/NOVA.');
   const motionRow=node(storyBox,'div','brain-row');
@@ -363,6 +455,109 @@ function render(api) {
    (story.movieHasAudio===true?'с озвучкой':
     story.movieHasAudio===false?'без звука':'наличие звука не указано')+
    '. Галерея → Фильмы/NOVA.');
+  if(Array.isArray(story.narrationDraft)&&story.narrationDraft.length){
+   const narrationBox=node(storyBox,'details','nova-more');
+   node(narrationBox,'summary','','🎙 Сценарий озвучки · '+story.narrationDraft.length+' реплик');
+   node(narrationBox,'p','small','Текст готового рассказа. Если реплика плохая — её можно заменить в «Сцены → Озвучка и диалог».');
+   story.narrationDraft.forEach((line,index)=>{
+    node(narrationBox,'p','small',(index+1)+'. '+String(line).slice(0,120));
+   });
+  }
+  const audioSettings=node(storyBox,'details','nova-more');
+  node(audioSettings,'summary','','🔊 Звук: '+(story.enableAudioEffects?'эффекты по выбору':'чистый голос, без шипения'));
+  node(audioSettings,'p','small','По умолчанию только голос. Эффекты не угадываются по промптам картинок. Экспериментальные звуки можно добавить вручную в каждой сцене.');
+
+  const inspectVoices=node(audioSettings,'button','council-button','🎧 Проверить голоса телефона');
+  inspectVoices.disabled=!voice?.status||!canEdit();
+  inspectVoices.onclick=async()=>{
+   try{
+    const available=await voice.status({engineId:story.voiceEngineId||''});
+    state.voiceChoices={...available,storyId:story.id,engineId:story.voiceEngineId||''};
+    state.error='';
+    state.notice='Движок: '+(available.engine||'Android')+
+     ' · локальных голосов: '+Number(available.count||0)+'.';
+   }catch(e){state.error='Голоса: '+(e?.message||String(e));}
+   render(api);
+  };
+  if(state.voiceChoices?.storyId===story.id){
+   const status=state.voiceChoices;
+   node(audioSettings,'p','small','Движок: '+(status.engine||'Android')+' · '+status.count+' локальных ru/uk голосов.');
+   const enginePick=node(audioSettings,'select','council-input');
+   const systemOption=node(enginePick,'option','','Системный голос (как на телефоне)');
+   systemOption.value='';
+   for(const info of status.engines||[]){
+    const entry=node(enginePick,'option','',info.label||info.id);
+    entry.value=info.id;
+   }
+   enginePick.value=status.engineId||'';
+   enginePick.onchange=async()=>{
+    try{
+     const engineId=enginePick.value;
+     const found=await voice.status({engineId});
+     state.voiceChoices={...found,storyId:story.id,engineId};
+     state.error='';
+     state.notice='Проверен движок '+(found.engine||'Android')+' · голосов: '+found.count;
+    }catch(e){state.error='Движок TTS: '+(e?.message||String(e));}
+    render(api);
+   };
+   if(!status.available){
+    node(audioSettings,'p','small','Android пока не передал NOVA подходящие офлайн-голоса. Это не доказывает, что модель отсутствует в HayaiTTS.');
+    if(typeof status.rawVoiceCount==='number'){
+     const ru=status.ruSupported?'да':'нет',uk=status.ukSupported?'да':'нет';
+     node(audioSettings,'p','small','Диагностика движка: всего голосов в API Android — '+status.rawVoiceCount+'; ru: '+ru+'; uk: '+uk+'.');
+    }
+   }
+   const voicePick=node(audioSettings,'select','council-input');
+   const autoVoice=node(voicePick,'option','','Автоматически — лучший по версии Android');
+   autoVoice.value='';
+   for(const item of status.voices||[]){
+    const entry=node(voicePick,'option','',(item.label||item.id)+' ('+item.language+')');
+    entry.value=item.id;
+   }
+   voicePick.value=enginePick.value===(story.voiceEngineId||'')?(story.voiceId||''):'';
+   const saveVoice=node(audioSettings,'button','council-button','💾 Выбрать голос');
+   saveVoice.disabled=!canEdit();
+   saveVoice.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    if(!current)return;
+    current.voiceEngineId=enginePick.value;
+    current.voiceId=voicePick.value;
+    if(!director.write(items))state.error='Не получилось сохранить голос.';
+    else{state.error='';state.notice='Голос выбран. Применится при следующем MP4.';}
+    render(api);
+   };
+   const listenVoice=node(audioSettings,'button','council-button','▶ Послушать голос');
+   listenVoice.disabled=!voice?.preview||!status.available;
+   listenVoice.onclick=async()=>{
+    try{
+     const result=await voice.preview({
+      voiceId:voicePick.value,
+      engineId:enginePick.value,
+      text:'В эту ночь она поняла: за дверью кто-то ждёт её ответа.'
+     });
+     state.notice='Звучит локальный голос: '+(result?.voice||voicePick.value||'Android');
+     state.error='';
+    }catch(e){state.error='Прослушивание: '+(e?.message||String(e));}
+    render(api);
+   };
+  }
+
+  node(audioSettings,'p','small','HayaiTTS: выбери Supertonic · speaker_0…speaker_9 (10 голосов). Они многоязычные: NOVA передаст русский или украинский язык при озвучке. Сначала проверь короткую фразу кнопкой «Послушать голос».');
+  const ttsLink=node(audioSettings,'a','brain-caption','HayaiTTS — официальный APK для ARM64');
+  ttsLink.href='https://github.com/HayaiApp/HayaiTTS/releases/download/v2.5.1/hayaitts-arm64-v8a-v2.5.1.apk';
+  ttsLink.target='_blank';
+  ttsLink.rel='noopener noreferrer';
+  const enableSounds=node(audioSettings,'button','council-button',
+   story.enableAudioEffects?'🔇 Отключить звуковые эффекты':'🔊 Разрешить выбранные звуки');
+  enableSounds.disabled=!canEdit();
+  enableSounds.onclick=()=>{
+   const items=director.read(),current=items.find(x=>x.id===story.id);
+   if(!current)return;
+   current.enableAudioEffects=!current.enableAudioEffects;
+   if(!director.write(items)){state.error='Не удалось сохранить настройки звука.';}
+   else{state.error='';state.notice='Настройки звука сохранены. Они применятся при следующем экспорте.';}
+   render(api);
+  };
   movie.onclick=async()=>{
    if(!canEdit()||!motion?.render||!readyFrames.length)return;
    if(!confirm('Сделать видео из '+readyFrames.length+' готовых кадров? NOVA проявит каждый кадр из темноты, добавит плавное движение и сохранит MP4. В этой первой версии видео БЕЗ звука. PNG и история останутся без изменений.'))return;
@@ -529,7 +724,10 @@ function render(api) {
    scenesPanel.hidden=!scenesPanel.hidden;
    show.textContent=scenesPanel.hidden?'▾ Сцены ('+story.scenes.length+')':'▴ Скрыть сцены';
   };
-  node(scenesPanel,'p','brain-caption','Герой: '+story.hero+' · Стиль: '+story.style);
+  node(scenesPanel,'p','brain-caption','Паспорт героя: '+story.hero+' · Стиль: '+
+   (director.artStyles().find(x=>x.id===story.styleId)?.label||story.style));
+  node(scenesPanel,'p','small','NOVA повторяет образ героя и художественный стиль в каждом промпте. Полное совпадение лиц SD1.5 пока не гарантируется.');
+  if(story.seriesId)node(scenesPanel,'p','small','🎭 Сериал: '+story.seriesTitle+' · Персонажей: '+(story.cast?.length||0)+'.');
   if(remaining.length){
    const resumePanel=node(scenesPanel,'div','brain-row');
    node(resumePanel,'p','small','Готово: '+(story.scenes.length-remaining.length)+' из '+story.scenes.length+
@@ -579,12 +777,61 @@ function render(api) {
    const row=node(scenesPanel,'div','brain-row');
    node(row,'div','council-heading','Сцена '+scene.number);
    node(row,'p','small',scene.beat);
+   if(Array.isArray(story.cast)&&story.cast.length){
+    const castDetails=node(row,'details','nova-more');
+    node(castDetails,'summary','','🎭 Кто присутствует в кадре');
+    node(castDetails,'p','small','Выбери только нужных людей. Пустой список — кадр окружения. После генерации готовый PNG не меняем.');
+    const checks=[];
+    for(const actor of story.cast){
+     const choice=node(castDetails,'label','small');
+     const check=node(choice,'input');
+     check.type='checkbox';
+     check.checked=(scene.castIds||[]).includes(actor.id);
+     check.disabled=!!scene.imageUri||!canEdit();
+     choice.appendChild(document.createTextNode(' '+actor.name+' · '+actor.role));
+     checks.push({id:actor.id,check});
+    }
+    const castSave=node(castDetails,'button','council-button','💾 Закрепить состав кадра');
+    castSave.disabled=!!scene.imageUri||!canEdit();
+    castSave.onclick=()=>{
+     if(!canEdit()||scene.imageUri)return;
+     try{
+      director.setSceneCast(story.id,scene.number,checks.filter(x=>x.check.checked).map(x=>x.id));
+      state.error='';state.notice='✅ Состав сцены '+scene.number+' сохранён без новой генерации.';
+     }catch(e){state.error=e?.message||String(e);}
+     render(api);
+    };
+    const actorId=(scene.castIds||[]).length===1?scene.castIds[0]:null;
+    const liveActor=actorId?root.NovaCharacterBible?.getCast(story.seriesId)
+     .find(x=>x.id===actorId):null;
+    if(liveActor?.referenceImageUri){
+     const anchorLabel=node(castDetails,'label','small');
+     const anchor=node(anchorLabel,'input');
+     anchor.type='checkbox';anchor.checked=!!scene.referenceEnabled;
+     anchor.disabled=!!scene.imageUri||!canEdit();
+     anchorLabel.appendChild(document.createTextNode(' 🔖 Использовать эталон этого героя (img2img, эксперимент)'));
+     anchor.onchange=()=>{
+      if(!canEdit()||scene.imageUri)return;
+      const all=director.read(),current=all.find(x=>x.id===story.id);
+      const target=current?.scenes.find(x=>x.number===scene.number);
+      if(!target)return;
+      target.referenceEnabled=anchor.checked;
+      if(!director.write(all))state.error='Не удалось сохранить режим img2img.';
+      else{state.error='';state.notice='Режим эталона сохранён. Рисование не запущено.';}
+      render(api);
+     };
+     node(castDetails,'p','small','img2img повторяет часть композиции эталона, поэтому лучше использовать для похожих ракурсов. Полное совпадение лица не гарантировано.');
+    }else{
+     node(castDetails,'p','small','Чтобы включить реальный img2img, закрепи готовый PNG у одного персонажа в «Библии сериала».');
+    }
+   }
    const voiceDetails=node(row,'details','nova-more');
    node(voiceDetails,'summary','','🎙 Озвучка и диалог');
-   node(voiceDetails,'p','small','По умолчанию NOVA произнесёт описание сцены. Можно заменить его репликой героя.');
+   node(voiceDetails,'p','small','По умолчанию NOVA сама напишет связный рассказ по всей истории. Здесь можно задать точную реплику или слова героя.');
    const voiceText=node(voiceDetails,'textarea','council-input');
-   voiceText.maxLength=120;
-   voiceText.value=scene.voiceText||scene.beat;
+   voiceText.maxLength=78;
+   voiceText.value=scene.voiceText||'';
+   voiceText.placeholder='Необязательно — NOVA напишет сама';
    voiceText.setAttribute('aria-label','Текст озвучки сцены '+scene.number);
    const voiceRole=node(voiceDetails,'select','council-input');
    const narratorOption=node(voiceRole,'option','','Рассказчик');
@@ -596,8 +843,11 @@ function render(api) {
    saveVoice.disabled=!canEdit();
    saveVoice.onclick=()=>{
     if(!canEdit())return;
-    const text=voiceText.value.trim().slice(0,120);
-    if(!text){state.error='Нужен текст для реплики.';render(api);return;}
+    const text=voiceText.value.trim().slice(0,78);
+    if(text && (!/[А-Яа-яЁёІіЇїЄєҐґ]/u.test(text)||/[A-Za-z]/.test(text)||text.length<5)){
+     state.error='Нужна понятная реплика на русском или украинском (до 78 знаков).';
+     render(api);return;
+    }
     const saved=director.read();
     const current=saved.find(p=>p.id===story.id);
     const shot=current?.scenes.find(s=>s.number===scene.number);
@@ -605,7 +855,46 @@ function render(api) {
     shot.voiceText=text;
     shot.voiceRole=voiceRole.value==='character'?'character':'narrator';
     if(!director.write(saved)){state.error='Не удалось сохранить реплику.';}
-    else{state.error='';state.notice='✅ Реплика сцены '+scene.number+' сохранена.';}
+    else{state.error='';state.notice=text?'✅ Реплика сцены '+scene.number+' сохранена.':
+     '✅ Для сцены '+scene.number+' снова включён автоматический сценарий NOVA.';}
+    render(api);
+   };
+   const vfxDetails=node(row,'details','nova-more');
+   node(vfxDetails,'summary','','🎞 Необязательный визуальный эффект');
+   const vfxSelect=node(vfxDetails,'select','council-input');
+   for(const [value,label] of [['none','Без эффектов'],['rain','Дождь (эксперимент)'],
+    ['torch','Мерцание огня (эксперимент)'],['fog','Туман (эксперимент)'],['glow','Сияние (эксперимент)']]){
+    const item=node(vfxSelect,'option','',label);item.value=value;
+   }
+   vfxSelect.value=scene.videoEffect||'none';
+   const saveVfx=node(vfxDetails,'button','council-button','💾 Сохранить визуальный эффект');
+   saveVfx.disabled=!canEdit();
+   saveVfx.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    const target=current?.scenes.find(x=>x.number===scene.number);
+    if(!target)return;
+    target.videoEffect=vfxSelect.value;
+    if(!director.write(items))state.error='Не удалось сохранить визуальный эффект.';
+    else{state.error='';state.notice='Эффект изображения сохранён для сцены.';}
+    render(api);
+   };
+   const soundDetails=node(row,'details','nova-more');
+   node(soundDetails,'summary','','🔈 Необязательный звук сцены');
+   const soundSelect=node(soundDetails,'select','council-input');
+   for(const [value,label] of [['none','Без звука'],['rain','Дождь (эксперимент)'],
+    ['torch','Огонь (эксперимент)'],['fog','Туман (эксперимент)'],['glow','Сияние (эксперимент)']]){
+    const item=node(soundSelect,'option','',label);item.value=value;
+   }
+   soundSelect.value=scene.audioEffect||'none';
+   const saveSound=node(soundDetails,'button','council-button','💾 Сохранить звук сцены');
+   saveSound.disabled=!canEdit();
+   saveSound.onclick=()=>{
+    const items=director.read(),current=items.find(x=>x.id===story.id);
+    const target=current?.scenes.find(x=>x.number===scene.number);
+    if(!target)return;
+    target.audioEffect=soundSelect.value;
+    if(!director.write(items))state.error='Не удалось сохранить звук.';
+    else{state.error='';state.notice='Звук сцены сохранён. Включи звуки в настройках проекта, если нужны.';}
     render(api);
    };
    const details=node(row,'details','nova-more');
@@ -618,23 +907,47 @@ function render(api) {
     photo.src=shot;
     photo.alt='Кадр NOVA — сцена '+scene.number;
    }
-   if(scene.imageUri)node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
+   if(scene.imageUri){
+    node(row,'p','small','✅ Кадр сохранён в Галерею → Pictures/NOVA · '+scene.renderSeconds+' сек.');
+    if(scene.modelLoadMs||scene.samplingMs)node(row,'p','small',
+     '⏱ Загрузка модели: '+Math.round((scene.modelLoadMs||0)/1000)+' с · Семплинг: '+
+      Math.round((scene.samplingMs||0)/1000)+' с'+(scene.referenceApplied?' · img2img':''));
+   }
    const progress=node(row,'p','small','');
    const draw=node(row,'button','council-button','🎨 Создать кадр '+scene.number+' · 512×512');
-   draw.disabled=state.creating||state.drawing||state.motionBusy||isBusy();
+   draw.disabled=!!scene.imageUri||state.creating||state.drawing||state.motionBusy||isBusy();
    draw.onclick=async()=>{
-    if(state.drawing||state.creating||state.motionBusy||isBusy())return;
+    if(scene.imageUri||state.drawing||state.creating||state.motionBusy||isBusy())return;
     if(!confirm('Нарисовать сцену '+scene.number+'? Сейчас на CPU это может занять около 20 минут. Качество и модель останутся прежними.'))return;
     state.drawing=true;draw.disabled=true;
     try{
      progress.textContent='🎬 Передаю готовый промпт генератору...';
-     const result=await generate(scene.prompt,text=>{progress.textContent=text});
-     scene.imageUri=result.imageUri||'saved';
+     const renderFrame=scene.referenceEnabled?
+      (typeof generateWithAnchor==='function'?generateWithAnchor:()=>Promise.reject(Error('Нужен модуль img2img'))):
+      generate;
+     const result=await renderFrame(scene.prompt,text=>{progress.textContent=text},scene,story);
+     if(result?.saved!==true||typeof result.imageUri!=='string'||
+        !/^content:\/\/media\/\S+$/i.test(result.imageUri))
+      throw Error('Android не подтвердил адрес PNG в Галерее. Кадр не отмечен готовым.');
+     // Read the current saved project: never overwrite changes made after
+     // this UI was opened (other scenes, cast, or voice settings).
+     const latest=director.read();
+     const stored=latest.find(item=>item.id===story.id);
+     const target=stored?.scenes.find(item=>item.number===scene.number);
+     if(!target||target.imageUri)
+      throw Error('Проект изменился во время рисования. PNG остаётся в Галерее; проверь сохранённые кадры.');
+     scene.imageUri=result.imageUri;
      scene.renderSeconds=Number(result.elapsedSeconds)||0;
-     if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
-     if(!director.write(director.read().map(item=>item.id===story.id?story:item))) {
+     scene.modelLoadMs=Number(result.modelLoadMs)||0;
+     scene.samplingMs=Number(result.samplingMs)||0;
+     scene.referenceApplied=!!result.referenceApplied;
+     Object.assign(target,{imageUri:scene.imageUri,renderSeconds:scene.renderSeconds,
+      modelLoadMs:scene.modelLoadMs,samplingMs:scene.samplingMs,
+      referenceApplied:scene.referenceApplied});
+     if(!director.write(latest)) {
       throw Error('Кадр создан, но не удалось обновить историю. PNG сохранён в Галерее.');
      }
+     if(typeof result.preview==='string' && result.preview.startsWith('data:image/png;base64,')) previews[key]=result.preview;
      state.notice='✅ Кадр '+scene.number+' создан и сохранён в Галерее.';
     }catch(e){state.error=e?.message||String(e)}
     finally{state.drawing=false;render(api);}
@@ -643,5 +956,5 @@ function render(api) {
  }
  filterCards();
 }
-root.NovaStoryUI=Object.freeze({render});
+root.NovaStoryUI=Object.freeze({render,prefillCouncil});
 })(typeof window!=='undefined'?window:globalThis);

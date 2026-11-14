@@ -142,7 +142,24 @@ test('Projects tab uses Gemma and requires user approval per image frame',()=>{
  assert.match(ui,/await brain\.prepare\(\)/);
  assert.match(ui,/await brain\.chat\(\{message:question,maxTokens:512\}\)/);
  assert.match(ui,/confirm\('Нарисовать сцену /);
- assert.match(ui,/await generate\(scene\.prompt/);
+ assert.match(ui,/await renderFrame\(scene\.prompt/);
  assert.match(ui,/director\.write/);
  assert.match(main,/generate:\(prompt,update\)=>executeImageGeneration\(prompt,update,512,12\)/);
+});
+
+test('Director council outline informs new six-scene prompts but never changes stored projects',()=>{
+ const before=JSON.stringify(story.read());
+ const idea='Психологический хоррор про отражение, которое живёт своей жизнью';
+ const brief='Формат 9:16, 30 секунд. Герой видит, что отражение поднимает руку раньше него. Звук: тихий гул, финал — затемнение.';
+ const first=story.ideaRequest(idea,3,brief);
+ assert.match(first,/Approved DIRECTOR COUNCIL outline/);
+ assert.match(first,/поднимает руку раньше него/);
+ assert.match(first,/не.*already filmed|not already filmed/);
+ const parsed=story.parse(valid,idea);
+ const second=story.continuationRequest(idea,parsed,brief);
+ assert.match(second,/Director Council outline for continuity/);
+ assert.match(second,/тихий гул/);
+ assert.equal(JSON.stringify(story.read()),before);
+ const plain=story.ideaRequest(idea,3);
+ assert.doesNotMatch(plain,/DIRECTOR COUNCIL outline/);
 });

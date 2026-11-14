@@ -26,12 +26,19 @@ object NativeImageEngine {
         negativePrompt: String,
         size: Int,
         steps: Int,
-        seed: Long
+        seed: Long,
+        referenceRgb: ByteArray? = null,
+        referenceStrength: Float = 0.60f
     ): ByteArray {
         check(libraryReady()) { loadError ?: "Native image engine missing" }
         require(size == 256 || size == 512) { "Supported sizes: 256 or 512" }
         require(steps in 1..30) { "Supported steps: 1..30" }
-        return nativeGenerate(modelPath, prompt, negativePrompt, size, steps, seed)
+        if (referenceRgb != null) {
+            require(referenceRgb.size == size * size * 3) { "Reference must be RGB at target size" }
+            require(referenceStrength in 0.25f..0.85f) { "img2img strength: 0.25..0.85" }
+        }
+        return nativeGenerate(modelPath, prompt, negativePrompt, size, steps, seed,
+            referenceRgb, referenceStrength)
     }
 
     /** Last completed or interrupted request: [model loading ms, sampling ms]. */
@@ -46,7 +53,8 @@ object NativeImageEngine {
     fun progress(): IntArray = if (libraryReady()) nativeProgress() else intArrayOf(0, 0)
     private external fun nativeGenerate(
         modelPath: String, prompt: String, negativePrompt: String,
-        size: Int, steps: Int, seed: Long
+        size: Int, steps: Int, seed: Long,
+        referenceRgb: ByteArray?, referenceStrength: Float
     ): ByteArray
     private external fun nativeTimings(): LongArray
     private external fun nativeGpuProbe(): String
