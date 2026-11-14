@@ -1,0 +1,94 @@
+name: Motion Wall Cars - one owner-signed patch candidate
+on:
+  push:
+    branches: [prototype/motion-wall-cars-v0]
+    paths: [.github/workflows/motion-wall-signed-candidate.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: motion-wall-signed-candidate
+  cancel-in-progress: false
+jobs:
+  signed-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lock Motion Wall isolated branch
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/heads/prototype/motion-wall-cars-v0"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Install Android SDK 36
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Verify offline and framing regression tests
+        run: cd motion-wall && bash tests/run_core_tests.sh
+      - name: Verify permanent owner signing key and pinned public fingerprint
+        env:
+          KEYSTORE_B64: ${{ secrets.NOVA_SIGNING_KEYSTORE_B64 }}
+          NOVA_SIGNING_PASSWORD: ${{ secrets.NOVA_SIGNING_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64"
+          test -n "$NOVA_SIGNING_PASSWORD"
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/motion-wall-owner.p12"
+          test -s "$RUNNER_TEMP/motion-wall-owner.p12"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          ACTUAL="$(keytool -list -v -storetype PKCS12 -alias nova-stable \
+            -keystore "$RUNNER_TEMP/motion-wall-owner.p12" -storepass:env NOVA_SIGNING_PASSWORD \
+            | grep -m1 'SHA256:' | sed 's/.*SHA256:[[:space:]]*//' | tr -d ':' \
+            | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          test "$ACTUAL" = "$EXPECTED" || { echo "::error::Owner certificate mismatch"; exit 1; }
+          echo "Verified permanent owner certificate (private key never uploaded)."
+      - name: Build permanently signed Motion Wall APK
+        working-directory: motion-wall
+        env:
+          MOTION_WALL_KEYSTORE_PATH: ${{ runner.temp }}/motion-wall-owner.p12
+          NOVA_SIGNING_PASSWORD: ${{ secrets.NOVA_SIGNING_PASSWORD }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify package identity version signer and offline permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=motion-wall/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          TOOL="$ANDROID_HOME/build-tools/36.0.0"
+          "$TOOL/aapt" dump badging "$APK" | grep "package: name='ai.motionwall.cars' versionCode='2'"
+          "$TOOL/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -F 'MotionWallpaperService'
+          if "$TOOL/aapt" dump permissions "$APK" | grep -iE 'android.permission.(INTERNET|READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE)'; then
+            echo "::error::Unexpected network or broad gallery permission"; exit 1
+          fi
+          "$TOOL/apksigner" verify --verbose --print-certs "$APK"
+          EXPECTED="$(tr -d '\r\n[:space:]' < android/signing/NOVA_STABLE_CERT_SHA256.txt)"
+          ACTUAL="$("$TOOL/apksigner" verify --print-certs "$APK" \
+            | sed -n -E 's/^(V[123] Signer: |Signer #[0-9]+ )certificate SHA-256 digest: ([0-9a-fA-F]{64})$/\2/p' \
+            | sed -n '1p' | tr '[:lower:]' '[:upper:]' | tr -d '\r\n')"
+          test -n "$ACTUAL" && test "$ACTUAL" = "$EXPECTED" || {
+            echo "::error::Signed APK certificate mismatch"; exit 1;
+          }
+          mkdir -p motion-wall/dist
+          cp "$APK" motion-wall/dist/Motion-Wall-Cars-v0.2-owner-signed.apk
+          (cd motion-wall/dist && sha256sum Motion-Wall-Cars-v0.2-owner-signed.apk > SHA256SUMS.txt)
+          echo "Signed candidate only. Android cannot update the initial ephemeral-debug-key install."
+      - name: Upload one signed candidate - not a public release
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOTION-WALL-CARS-v0.2-OWNER-SIGNED-CANDIDATE
+          path: |
+            motion-wall/dist/Motion-Wall-Cars-v0.2-owner-signed.apk
+            motion-wall/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove private signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/motion-wall-owner.p12"
