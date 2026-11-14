@@ -110,9 +110,9 @@ function validate(result,original,styleId=null,castPlan=null) {
    // In preset mode keep protagonist + style BEFORE optional shot details,
    // rather than at the tail where SD1.5 may truncate the text context.
    const comma=chosen?shot.indexOf(','):-1;
-   const lead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
+   const shotLead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
    const extra=chosen&&comma>0?clipWords(shot.slice(comma+1).trim(),80):'';
-   const prompt=lead+', same protagonist: '+heroAnchor+
+   const prompt=shotLead+', same protagonist: '+heroAnchor+
      ', visual continuity: '+styleAnchor+(extra?', '+extra:'')+
      (castPlan?', single registered protagonist':'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
