@@ -17,6 +17,9 @@ public final class MotionVideoWallpaperService extends WallpaperService {
     @Override public Engine onCreateEngine() {return new VideoEngine();}
 
     private final class VideoEngine extends Engine {
+        private MediaPlayer player;
+        private boolean visible, surfaceReady, destroyed;
+        private int session;
         private final Handler handler=new Handler(Looper.getMainLooper());
         private final SharedPreferences prefs=getSharedPreferences(PhotoStore.PREFS,MODE_PRIVATE);
         private final SharedPreferences.OnSharedPreferenceChangeListener listener=(preferences,key)->{
@@ -30,10 +33,6 @@ public final class MotionVideoWallpaperService extends WallpaperService {
                 });
             }
         };
-        private MediaPlayer player;
-        private boolean visible, surfaceReady, destroyed;
-        private int session;
-
         @Override public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
             prefs.registerOnSharedPreferenceChangeListener(listener);
