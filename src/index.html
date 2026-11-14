@@ -25,7 +25,17 @@ input{flex:1;min-width:0;border:1px solid #39435e;background:#20283b;color:white
 button{border:0;background:#6d70f5;color:white;border-radius:16px;padding:0 18px;font-size:18px}
 nav{display:flex;justify-content:space-around;padding:14px 0 6px;color:#b8c1dc;font-size:13px}
 nav span{cursor:pointer;padding:5px 1px;white-space:nowrap}
-nav{font-size:11px;gap:4px}
+nav{font-size:12px;gap:5px}
+nav span.secondary-tab{display:none}
+nav span.more-selected{color:#999bff;font-weight:bold}
+.chat-actions{justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.nova-idea-button{font-size:13px;min-height:42px;padding:9px 12px;background:#5965be}
+.nova-history-details{font-size:12px;color:#a7b1cc}
+.nova-history-details summary{cursor:pointer;padding:10px}
+.nova-idea-card{background:#1b2b39;border:1px solid #395668;border-radius:15px;padding:14px;margin-bottom:14px;line-height:1.5}
+.nova-more-action{display:block;width:100%;text-align:left;min-height:48px;padding:12px 14px;margin:9px 0;background:#313b55;font-size:14px}
+.nova-setting{display:flex;gap:12px;align-items:center;line-height:1.5;padding:8px 0}
+.nova-setting input{flex:none;width:20px;height:20px;accent-color:#888bff}
 .brain-row{padding:14px;margin:10px 0;border:1px solid #344059;border-radius:14px;background:#141c2d;line-height:1.5}
 .brain-row button{margin-top:10px;padding:10px 14px;font-size:13px;min-height:42px}
 .nova-more{margin:14px 0 2px;border-top:1px solid #38445f;padding-top:12px}
@@ -67,17 +77,18 @@ button:disabled{opacity:.45}
 <body>
 <div class="app">
 <header>
-<div class="brand">✦ NOVA · DIRECTOR LAB</div>
-<div class="subtitle">Локальные мозги · режиссёрский совет · инструменты</div>
+<div class="brand">✦ NOVA · РЕЖИССЁР</div>
+<div class="subtitle">Твоя творческая напарница · работает офлайн</div>
 </header>
 <main id="content"></main>
 <div class="bottom">
 <nav>
-<span class="active" data-tab="chat">💬 Чат</span>
-<span data-tab="council">🎬 Совет</span>
-<span data-tab="projects">📁 Проекты</span>
-<span data-tab="brains">🧠 Мозги</span>
-<span data-tab="tools">🧰 Руки</span>
+<span class="active" data-tab="chat">💬 Общение</span>
+<span data-tab="projects">🎬 Проекты</span>
+<span data-tab="tools">🧰 Студия</span>
+<span data-tab="more">☰ Ещё</span>
+<span class="secondary-tab" data-tab="council">🎬 Совет</span>
+<span class="secondary-tab" data-tab="brains">🧠 Мозги</span>
 </nav>
 <div class="compose" id="compose">
 <input id="message" placeholder="Напиши задачу NOVA...">
@@ -89,10 +100,13 @@ button:disabled{opacity:.45}
 <script src="nova_storyboard.js"></script>
 <script src="nova_tool_registry.js"></script>
 <script src="nova_image_prompt_guard.js"></script>
+<script src="nova_character_bible.js"></script>
+<script src="nova_series_ui.js"></script>
 <script src="nova_story_director.js"></script>
 <script src="nova_comic_narrator.js"></script>
 <script src="nova_story_ui.js"></script>
 <script src="nova_story_chat.js"></script>
+<script src="nova_director_initiative.js"></script>
 <script>
 const content=document.getElementById('content');
 const compose=document.getElementById('compose');
@@ -152,9 +166,42 @@ function showChat(){
   showChat();
  };
 
- actions.appendChild(clear);
+ const ideaButton=document.createElement('button');
+ ideaButton.className='nova-idea-button';
+ ideaButton.textContent=window.NovaDirectorInitiative?.shouldOffer()?'💡 Нова предлагает идею':'💡 Идея от Новы';
+ ideaButton.disabled=busy||imageBusy;
+ ideaButton.onclick=()=>generateNovaIdea();
+ actions.appendChild(ideaButton);
+ const advanced=document.createElement('details');
+ advanced.className='nova-history-details';
+ const advancedTitle=document.createElement('summary');
+ advancedTitle.textContent='⋯ История';
+ advanced.appendChild(advancedTitle);
+ advanced.appendChild(clear);
+ actions.appendChild(advanced);
  content.appendChild(actions);
-
+ const proposed=window.NovaDirectorInitiative?.savedIdea();
+ if(proposed?.text){
+  const card=document.createElement('div');
+  card.className='nova-idea-card';
+  card.textContent='💡 Замысел Новы: '+proposed.text;
+  const ratings=document.createElement('div');
+  ratings.className='tool-actions';
+  const previous=window.NovaDirectorInitiative?.lastReaction();
+  for(const [liked,title] of [[true,'👍 Нравится'],[false,'👎 Не моё']]){
+   const vote=document.createElement('button');
+   vote.className='nova-idea-button';
+   vote.textContent=title+(previous?.liked===liked?' ✓':'');
+   vote.disabled=busy;
+   vote.onclick=()=>{
+    try{window.NovaDirectorInitiative.rateIdea(liked);showChat();}
+    catch(error){console.warn('NOVA: не сохранила отзыв',error);}
+   };
+   ratings.appendChild(vote);
+  }
+  card.appendChild(ratings);
+  content.appendChild(card);
+ }
  history.forEach(m=>addMessage(m.who,m.text,m.preview));
  content.scrollTop=content.scrollHeight;
 }
@@ -179,18 +226,29 @@ function imageRequest(text){
 }
 
 function imageNegativePrompt(prompt){
- const artistic=/(?:anime|аниме|мульт|cartoon|illustration|drawing|ілюстрац)/iu.test(prompt);
+ const artistic=/(?:anime|аниме|мульт|cartoon|illustration|drawing|ілюстрац|graphic novel|comic|ink outlines|painterly|watercolor|storybook|cel shading)/iu.test(prompt);
  return (artistic?'low quality, ugly, duplicate, incorrect proportions':
   'low quality, artificial skin, bad anatomy, deformed face, extra limbs')+
   ', color banding, posterization, neon colors, extreme saturation, distorted, blurry, text, watermark';
 }
 function imageEnhancedPrompt(raw){
- const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац)/iu.test(raw);
+ const anime=/(?:anime|аниме|cartoon|мульт|illustration|ілюстрац|graphic novel|comic|ink outlines|painterly|watercolor|storybook|cel shading)/iu.test(raw);
  const detailed=/(?:photorealistic|realistic photography|cinematic lighting|detailed photo|35mm film|high detail)/iu.test(raw);
  if(anime||detailed)return raw.trim();
  return (raw.trim()+', photorealistic cinematic photograph, natural colors, balanced exposure, sharp focus, detailed textures').slice(0,590);
 }
-async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCount=null){
+function referenceOptions(scene,story){
+ if(!scene?.referenceEnabled)return null;
+ if(!story?.seriesId||!Array.isArray(scene.castIds)||scene.castIds.length!==1)
+  throw Error('img2img доступен только для одного закреплённого персонажа в кадре.');
+ const actor=rootlessCast(story.seriesId).find(x=>x.id===scene.castIds[0]);
+ if(!actor?.referenceImageUri)throw Error('У этого героя нет доступного сохранённого кадра-эталона.');
+ return {referenceImageUri:actor.referenceImageUri,referenceStrength:0.60};
+}
+function rootlessCast(seriesId){
+ return window.NovaCharacterBible?.getCast(seriesId)||[];
+}
+async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCount=null,options=null){
  if(imageBusy)throw new Error('NOVA уже создаёт изображение.');
  const bridge=window.Capacitor?.Plugins?.NovaImage;
  if(!bridge)throw new Error('В этой APK ещё нет модуля NOVA Image.');
@@ -235,9 +293,14 @@ async function executeImageGeneration(prompt,onProgress=()=>{},size=512,stepCoun
      onProgress('🎨 Прогресс движка: '+(e.step||0)+' / '+total+' · настройка '+steps+' шагов SD · '+minutes+' мин. CPU, офлайн.');
    });
    onProgress('🎨 Создаю изображение · '+size+'×'+size+' · '+steps+' шагов. Первый запуск может быть долгим.');
+   if(options?.referenceImageUri)onProgress('🔖 Использую сохранённый кадр как опорное изображение (img2img).');
    const result=await bridge.generate({
      prompt:visualPrompt,negative:imageNegativePrompt(visualPrompt),
-     size,steps
+     size,steps,
+     ...(options?.referenceImageUri?{
+      referenceImageUri:options.referenceImageUri,
+      referenceStrength:options.referenceStrength||0.60
+     }:{})
    });
    result.elapsedSeconds=Math.round((Date.now()-startedAt)/1000);
    result.promptUsed=visualPrompt;
@@ -328,7 +391,8 @@ async function handleStoryImageMessage(text){
  try{
   const outcome=await window.NovaStoryChat.run({
    text,brain,sceneCount:6,
-   generate:(prompt,onProgress)=>executeImageGeneration(prompt,onProgress,512,12),
+   generate:(prompt,onProgress,scene,story)=>
+    executeImageGeneration(prompt,onProgress,512,12,referenceOptions(scene,story)),
    isCancelled:()=>cancelled,
    onStatus:update,
    onPlanned:story=>{
@@ -397,8 +461,16 @@ async function send(){
  const text=input.value.trim();
  if(!text || busy)return;
 
- // Compound story + illustration requests must use the real native tools,
- // not a Gemma message pretending that a picture was produced.
+ // Self-critique is handled by the actual native three-stage Council.
+ // "Prepare six frames" is a storyboard request, not a render authorization.
+ if(window.NovaStoryChat?.wantsCouncilPlanning(text)){
+  councilState.task=text;
+  input.value='';
+  document.querySelector('nav span[data-tab="council"]')?.click();
+  await startCouncil();
+  return;
+ }
+ // Only explicitly requested story + image rendering uses the native pipeline.
  if(window.NovaStoryChat?.wantsStoryImages(text)){
   await handleStoryImageMessage(text);
   return;
@@ -496,8 +568,13 @@ async function send(){
     catch(error){console.warn('NOVA: отмена не удалась',error);}
   };
   try{
-    const answer=await brain.chat({message:text,requestId});
+    // Short local memory for creative discussion; ordinary chat stays unchanged.
+     // No additional LLM pass, so there is no costly second inference.
+     const preparedMessage=window.NovaDirectorInitiative?.creativeChatPrompt?.(text,history)||text;
+     const answer=await brain.chat({message:preparedMessage,requestId});
     waiting.text=answer.answer || streamed || (stopped?'Ответ остановлен.':'NOVA вернула пустой ответ.');
+     if(!stopped && typeof answer.answer==='string')
+       window.NovaDirectorInitiative?.rememberChatIdea?.(text,answer.answer);
   }finally{
     stopButton.style.display='none';
     stopButton.onclick=null;
@@ -510,24 +587,31 @@ async function send(){
   saveHistory();
   document.getElementById('send').disabled=false;
   showChat();
+  // Do not start unsolicited inference after an ordinary chat reply.
  }
 }
 document.getElementById('send').onclick=send;
 input.addEventListener('keydown',e=>{if(e.key==='Enter')send()});
 document.querySelectorAll('nav span').forEach(tab=>{
  tab.onclick=()=>{
-  document.querySelectorAll('nav span').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('nav span').forEach(x=>{x.classList.remove('active');x.classList.remove('more-selected');});
   tab.classList.add('active');
   const selected=tab.dataset.tab;
   compose.style.display=selected==='chat'?'flex':'none';
   if(selected==='chat')return showChat();
+  if(selected==='more')return showNovaMore();
+  if(selected==='council'||selected==='brains')
+   document.querySelector('nav span[data-tab="more"]')?.classList.add('more-selected');
   if(selected==='projects')return window.NovaStoryUI.render({
    content,
    brain:window.Capacitor?.Plugins?.NovaBrain,
    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12),
+   generateWithAnchor:(prompt,update,scene,story)=>
+    executeImageGeneration(prompt,update,512,12,referenceOptions(scene,story)),
    resumeStory:(storyId,onStatus,onFrame,isCancelled)=>window.NovaStoryChat.resumeExisting({
     storyId,onStatus,onFrame,isCancelled,
-    generate:(prompt,update)=>executeImageGeneration(prompt,update,512,12)
+    generate:(prompt,update,scene,story)=>
+     executeImageGeneration(prompt,update,512,12,referenceOptions(scene,story))
    }),
    isBusy:()=>busy||imageBusy
   });
@@ -569,6 +653,100 @@ showChat();
 
 
 
+
+
+// NOVA can initiate a new idea after the local brain is ready.
+// Never run an online service, start image rendering, or touch other apps.
+let novaIdeaPending=false;
+async function generateNovaIdea(){
+ const initiative=window.NovaDirectorInitiative;
+ const brain=window.Capacitor?.Plugins?.NovaBrain;
+ if(!initiative||!brain||novaIdeaPending||busy||imageBusy||councilState.running)return;
+ let state;
+ try{state=await brain.status();}
+ catch(error){console.warn('NOVA idea model status',error);history.push({who:'nova',text:'Не удалось проверить локальный мозг. Попробуй ещё раз.'});saveHistory();showChat();return;}
+ if(state.engine!=='ModelReady'){
+  // Explicit tap: manual model preparation is allowed.
+  try{await novaPrepareOnce();state=await brain.status();}
+  catch(error){history.push({who:'nova',text:'Чтобы предложить идею, сначала подключи локальный мозг в «Ещё → Мозги». '+(error?.message||'')});saveHistory();showChat();return;}
+ }
+ if(state.engine!=='ModelReady'){
+  history.push({who:'nova',text:'Локальная модель пока не готова. Проверь «Ещё → Мозги».'});saveHistory();showChat();
+  return;
+ }
+ // Repeat the guard after awaiting status: a render could have started.
+ if(novaIdeaPending||busy||imageBusy||councilState.running)return;
+ novaIdeaPending=true;busy=true;
+ let cancelled=false;
+ const stopButton=document.getElementById('stop');
+ stopButton.style.display='inline-block';stopButton.disabled=false;
+ stopButton.onclick=async()=>{
+  if(cancelled)return;
+  cancelled=true;stopButton.disabled=true;
+  try{await brain.cancelChat();}catch(error){console.warn('NOVA: отмена идеи',error);}
+ };
+ const waiting={who:'nova',text:'💡 NOVA обдумывает идею для следующего ролика...'};
+ history.push(waiting);
+ history.splice(history.length-1,0,{who:'user',text:'Нова, предложи свою идею для следующего ролика'});
+ showChat();
+ try{
+  const stories=window.NovaStoryDirector?.read?.()||[];
+  const prompt=initiative.prompt(stories);
+  const requestId='nova-idea-'+Date.now();
+  const answer=await brain.chat({message:prompt,maxTokens:180,requestId});
+  const text=String(answer?.answer||'').trim();
+  if(cancelled){waiting.text='Идея остановлена по твоему запросу.';return;}
+  if(!text)throw Error('Локальный мозг не предложил идею.');
+  waiting.text='💡 Моя идея: '+text.slice(0,1000);
+  try{initiative.recordIdea(text);}catch(error){console.warn('NOVA: idea not saved',error);}
+ }catch(error){waiting.text='⚠ Не удалось придумать идею: '+(error?.message||String(error));}
+ finally{
+  stopButton.style.display='none';stopButton.onclick=null;
+  novaIdeaPending=false;busy=false;saveHistory();
+  // Finishing a background idea must not replace an open project or tool screen.
+  if(document.querySelector('nav span.active')?.dataset.tab==='chat')showChat();
+ }
+}
+function showNovaMore(){
+ content.replaceChildren();
+ const panel=document.createElement('section');
+ panel.className='panel';
+ const title=document.createElement('div');
+ title.className='council-heading';
+ title.textContent='⚙ Настройки и режиссёрский штаб';
+ panel.appendChild(title);
+ const intro=document.createElement('p');
+ intro.className='small';
+ intro.textContent='На главном экране только общение, проекты и студия. Остальные инструменты здесь.';
+ panel.appendChild(intro);
+ const addButton=(label,tab)=>{
+  const button=document.createElement('button');
+  button.className='nova-more-action';button.textContent=label;
+  button.onclick=()=>document.querySelector('nav span[data-tab="'+tab+'"]')?.click();
+  panel.appendChild(button);
+ };
+ addButton('🎬 Режиссёрский совет и Critic','council');
+ addButton('🧠 Модели и восстановление мозгов','brains');
+ const setting=document.createElement('label');
+ setting.className='nova-setting';
+ const toggle=document.createElement('input');
+ toggle.type='checkbox';
+ toggle.checked=window.NovaDirectorInitiative?.preferences().initiative!==false;
+ toggle.onchange=()=>{
+  try{window.NovaDirectorInitiative?.setInitiative(toggle.checked);}
+  catch(error){toggle.checked=!toggle.checked;console.warn('NOVA: настройка не сохранена',error);}
+ };
+ setting.appendChild(toggle);
+ const wording=document.createElement('span');
+ wording.textContent='Нова предлагает новую идею в чате, но запускает тяжёлую генерацию только по нажатию. Это защищает телефон от зависаний.';
+ setting.appendChild(wording);
+ panel.appendChild(setting);
+ const safety=document.createElement('p');
+ safety.className='small';
+ safety.textContent='🔒 Сейчас интернет используется только для разрешённых загрузок NOVA Tools. Самостоятельного доступа к ChatGPT и управления другими приложениями пока нет. Ничего не публикуется и не удаляется автоматически.';
+ panel.appendChild(safety);
+ content.appendChild(panel);
+}
 
 async function showBrainManager(){
  content.replaceChildren();
@@ -1183,6 +1361,21 @@ function showCouncil(){
    box.id='council-'+key;
  }
  if(councilState.last){
+   // The council does NOT render frames. This hands off an editable project brief.
+   const handoff=addCouncilElement(content,'section','panel');
+   addCouncilElement(handoff,'p','small',
+     'Режиссёр одобрил замысел. Передай его в «Проекты»: там Gemma подготовит 6 кадров, а генерацию изображений ты запустишь отдельно.');
+   const toProjects=addCouncilElement(handoff,'button','council-button','🎬 Продолжить в Проектах');
+   toProjects.disabled=councilState.running || busy;
+   toProjects.onclick=()=>{
+     try{
+       window.NovaStoryUI.prefillCouncil(councilState.task,councilState.final);
+       document.querySelector('nav span[data-tab="projects"]')?.click();
+     }catch(error){
+       councilState.error='Не удалось передать идею: '+(error?.message||String(error));
+       showCouncil();
+     }
+   };
    const checkPanel=addCouncilElement(content,'section','panel');
    addCouncilElement(checkPanel,'div','council-heading','🔍 Critic: проверка текстового плана');
    if(Array.isArray(councilState.last.checks)){
@@ -1313,9 +1506,14 @@ async function novaPrepareOnce() {
   if (!brain) throw new Error("NovaBrain недоступен");
 
   novaPreparePending = (async () => {
+    // Share the loader with chat, Council, and app startup. An Initializing
+    // engine must finish its current work before another prepare is attempted.
+    if(window.NovaStoryChat?.readyBrain){
+      const loaded=await window.NovaStoryChat.readyBrain(brain);
+      return {loaded};
+    }
     const status = await brain.status();
-    if (status.engine === "ModelReady")
-      return {loaded:true};
+    if (status.engine === "ModelReady")return {loaded:true};
     return await brain.prepare();
   })();
 
@@ -1356,6 +1554,7 @@ if (document.readyState === 'loading') {
 } else {
   novaAutoPrepare();
 }
+// No auto-generated idea on startup. User starts it from the visible idea button.
 
 </script>
 </body>

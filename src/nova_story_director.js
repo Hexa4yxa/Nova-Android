@@ -3,17 +3,56 @@
 (function(root) {
 'use strict';
 const KEY='nova_story_projects_v1';
+// Lightweight text presets for the EXISTING SD1.5 model: no downloads or
+// second image engine. They guide composition, not guaranteed face identity.
+const ART_STYLES=Object.freeze([
+ Object.freeze({id:'comic',label:'Кинокомикс',hint:'Чёткие контуры, мрачное кино',
+  prompt:'cinematic graphic novel, bold ink outlines, muted colors, dramatic light'}),
+ Object.freeze({id:'anime',label:'Аниме',hint:'Чистые линии, яркие эмоции',
+  prompt:'anime film illustration, clean line art, expressive faces, soft cel shading'}),
+ Object.freeze({id:'painting',label:'Живописная иллюстрация',hint:'Мягкий рисунок и свет',
+  prompt:'painterly storybook illustration, soft brush textures, atmospheric light'})
+]);
+function artStyles() {
+ return ART_STYLES.map(x=>({id:x.id,label:x.label,hint:x.hint}));
+}
+function findArtStyle(id) {
+ if(id==null||id==='')return null; // Older stories keep their original style.
+ const chosen=ART_STYLES.find(x=>x.id===id);
+ if(!chosen)throw Error('Неизвестный стиль NOVA — выбери один из трёх.');
+ return chosen;
+}
+function detectArtStyle(text) {
+ const words=String(text||'').toLowerCase();
+ if(/аниме|anime|манга|manga/u.test(words))return 'anime';
+ if(/акварел|живопис|painted|watercolor|watercolour|storybook/u.test(words))return 'painting';
+ return 'comic';
+}
 function clean(value,max) { return String(value==null?'':value).replace(/[\u0000-\u001f]/g,' ').trim().slice(0,max); }
-function ideaRequest(idea,count=3) {
+function ideaRequest(idea,count=3,councilBrief='',styleId=null,seriesCast=null) {
  const subject=clean(idea,380);
  if(subject.length<12)throw Error('Опиши идею истории хотя бы одним предложением.');
  const number=Math.max(1,Math.min(3,Number(count)||3));
+ const chosen=findArtStyle(styleId);
  return [
   'You are NOVA, a creative film director. Create a cohesive ORIGINAL three-scene storyboard.',
   'Story idea from owner (must preserve it): '+subject,
+  ...(chosen?[
+   'LOCKED ART STYLE (mandatory for every scene): '+chosen.prompt,
+   'Use this exact style anchor in the style field. Do not switch to photography or another style.'
+  ]:[]),
+  ...(clean(councilBrief,480)?['Approved DIRECTOR COUNCIL outline (guidance for six scenes, not already filmed): '+clean(councilBrief,480)]:[]),
+  ...(seriesCast?.cast?.length?[
+   'FIXED SERIES CAST (do NOT invent different faces or outfits):',
+   seriesCast.cast.map(x=>clean(x.name,40)+' ['+clean(x.role,12)+']: '+clean(x.appearance,155)).join('; ').slice(0,550),
+   'Different named cast members are distinct people. Show only characters required by the plot, no duplicate bodies.'
+  ]:[]),
   'Return ONLY a compact JSON object, NO Markdown, with these exact fields:',
-  '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
+  chosen?
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"locked English art style","scenes":[{"beat":"short Russian event","prompt":"single English SD1.5 illustrated scene matching locked style"}] }':
+    '{"title":"short Russian title","hero":"one clear English character appearance anchor","style":"short English visual style and mood anchor","scenes":[{"beat":"short Russian event","prompt":"single English photorealistic Stable Diffusion 1.5 prompt"}] }',
   'Make exactly '+number+' scenes. One single protagonist look across all scenes.',
+  'Give the protagonist a fixed distinctive appearance: hair, face and outfit. Repeat the same identity in every scene.',
   'Each English prompt must START with a concrete visible subject doing an ACTION in a specific LOCATION, then framing and light.',
   'Preserve user-mentioned objects, architecture, geography and spatial relations in the relevant scenes. Do not replace them with generic scenery.',
   'Place the actual scene subject and setting BEFORE decorative style or character-consistency notes so SD 1.5 sees them first.',
@@ -37,10 +76,13 @@ function clipWords(value,maxLength) {
  const cut=slice.lastIndexOf(' ');
  return (cut>0?slice.slice(0,cut):slice).replace(/[.,;:\s]+$/,'');
 }
-function validate(result,original) {
+function validate(result,original,styleId=null) {
  if(!result||typeof result!=='object'||!Array.isArray(result.scenes))throw Error('Не удалось получить список сцен.');
  const title=clean(result.title,100);
- const hero=clean(result.hero,220),style=clean(result.style,160);
+ const chosen=findArtStyle(styleId);
+ const hero=clean(result.hero,220);
+ // User-picked preset is authoritative; Gemma cannot silently replace it.
+ const style=chosen?chosen.prompt:clean(result.style,160);
  if(!title||!english(hero)||!english(style))throw Error('Gemma не подготовила английское описание героя и стиля.');
  if(result.scenes.length<1||result.scenes.length>3)throw Error('Нужно от одной до трёх сцен.');
  const scenes=result.scenes.map((x,i)=>{
@@ -50,36 +92,48 @@ function validate(result,original) {
    // SD 1.5's text context is limited. Put the scene-specific subject,
    // action and location FIRST, and continuity anchors AFTER them.
    // Otherwise the tokenizer may drop the real action at the end.
-   const shot=clipWords(rawPrompt,360);
+   const shot=clipWords(rawPrompt,chosen?240:360);
    const heroAnchor=clipWords(hero,100);
    const styleAnchor=clipWords(style,75);
-   const prompt=shot+', same protagonist: '+heroAnchor+
-     ', visual continuity: '+styleAnchor;
+   // In preset mode keep protagonist + style BEFORE optional shot details,
+   // rather than at the tail where SD1.5 may truncate the text context.
+   const comma=chosen?shot.indexOf(','):-1;
+   const lead=chosen?clipWords(comma>0?shot.slice(0,comma):shot,125):shot;
+   const extra=chosen&&comma>0?clipWords(shot.slice(comma+1).trim(),80):'';
+   const prompt=lead+', same protagonist: '+heroAnchor+
+     ', visual continuity: '+styleAnchor+(extra?', '+extra:'');
    if(prompt.length>590)throw Error('Сцена '+(i+1)+': слишком длинный промпт.');
    if(!english(prompt))throw Error('Сцена '+(i+1)+': промпт не на английском.');
-   return {number:i+1,beat,prompt,imageUri:'',renderSeconds:0};
+   return {number:i+1,beat,prompt,sourcePrompt:rawPrompt,imageUri:'',renderSeconds:0};
  });
  return {
    id:'story-'+Date.now(),title,idea:clean(original,380),hero,style,
+   ...(chosen?{styleId:chosen.id}:{}),
    createdAt:new Date().toISOString(),scenes
  };
 }
-function parse(raw,original){return validate(extract(raw),original);}
+function parse(raw,original,styleId=null){return validate(extract(raw),original,styleId);}
 
 /* Producing six long JSON shots in one 512-token Gemma reply is unreliable.
    Plan scenes 1-3 and 4-6 in two small offline calls, then save ONCE.
    This does not change the format of older 1-3 scene stories. */
-function continuationRequest(original,first) {
+function continuationRequest(original,first,councilBrief='',seriesCast=null) {
  if(!first||!Array.isArray(first.scenes)||first.scenes.length!==3)
   throw Error('Сначала нужно подготовить три начальные сцены.');
  const subject=clean(original,380);
  return [
   'You are NOVA, continuing an ORIGINAL six-scene motion-comic story.',
   'The owner\'s original story: '+subject,
+  ...(clean(councilBrief,300)?['Director Council outline for continuity: '+clean(councilBrief,300)]:[]),
   'The first THREE scenes have ALREADY happened:',
   first.scenes.map(scene=>String(scene.number)+'. '+clean(scene.beat,190)).join('\n'),
   'The SAME protagonist MUST be: '+clean(first.hero,180),
   'The SAME visual style MUST be: '+clean(first.style,130),
+  ...(seriesCast?.cast?.length?[
+   'The registered cast remains unchanged:',
+   seriesCast.cast.map(x=>clean(x.name,40)+': '+clean(x.appearance,120)).join('; ').slice(0,450)
+  ]:[]),
+  'Keep the same face, hairstyle, outfit and art medium in ALL later scenes.',
   'Write ONLY the NEXT THREE distinct scenes (scenes FOUR, FIVE, SIX). Each advances the plot; scene 6 gives a powerful ending.',
   'Return ONLY one compact JSON object, no Markdown, with these fields:',
   '{"title":"same story title","hero":"same English appearance anchor","style":"same English style anchor","scenes":[{"beat":"short Russian action","prompt":"short English SD1.5 visible scene prompt"}]}',
@@ -99,10 +153,68 @@ function appendContinuation(first,raw) {
   throw Error('NOVA должна завершить историю тремя дополнительными сценами.');
  const more=validate({
   title:first.title,hero:first.hero,style:first.style,scenes:parsed.scenes
- },first.idea);
+ },first.idea,first.styleId||null);
  return {...first,
   scenes:first.scenes.concat(more.scenes.map((scene,i)=>({...scene,number:i+4})))
  };
+}
+
+// A single series bible spans episodes. Each episode captures an immutable
+// cast snapshot. Scene casting is editable only BEFORE a costly render.
+function castPrompt(source,characters,style) {
+ const original=clean(source,470);
+ if(!english(original)||original.length<25)throw Error('Нет исходного английского описания сцены.');
+ const comma=original.indexOf(',');
+ const lead=clipWords(comma>0?original.slice(0,comma):original,120);
+ const extra=comma>0?clipWords(original.slice(comma+1).trim(),65):'';
+ const actors=characters.slice(0,3).map(x=>
+  (english(x.name)?clean(x.name,36)+': ':'')+clipWords(x.appearance,112));
+ const cast=actors.length?', cast: '+actors.join('; '):', no characters visible';
+ // SD1.5 CLIP context is short. Put selected actors BEFORE optional details.
+ const result=lead+cast+', visual continuity: '+clipWords(style,75)+(extra?', '+extra:'');
+ return clipWords(result,590);
+}
+function bindSeries(story,bibleSnapshot) {
+ if(!story||!Array.isArray(story.scenes)||!bibleSnapshot||
+    !Array.isArray(bibleSnapshot.cast)||!bibleSnapshot.cast.length)
+  throw Error('Добавь хотя бы одного персонажа в библиотеку сериала.');
+ const characters=bibleSnapshot.cast.map(x=>({
+  id:clean(x.id,120),name:clean(x.name,60),role:clean(x.role,16),
+  appearance:clean(x.appearance,300),referenceImageUri:clean(x.referenceImageUri,260)
+ }));
+ if(characters.some(x=>!x.id||!x.name||!english(x.appearance)||!x.appearance.length||
+   x.appearance.length<12||x.referenceImageUri&&!/^content:\/\/media\/[^/?]+\/images\/media\/\d+$/i.test(x.referenceImageUri)))
+  throw Error('В библии сериала есть неполные паспорта персонажей.');
+ const lead=characters.find(x=>x.role==='hero')||characters[0];
+ story.seriesId=clean(bibleSnapshot.seriesId,120);
+ story.seriesTitle=clean(bibleSnapshot.seriesTitle,90);
+ story.cast=characters;
+ story.hero=lead.appearance;
+ for(const scene of story.scenes){
+  scene.castIds=[lead.id];
+  scene.prompt=castPrompt(scene.sourcePrompt||scene.prompt,[lead],story.style);
+ }
+ return story;
+}
+function setSceneCast(storyId,sceneNumber,ids) {
+ if(!Array.isArray(ids)||ids.length>3||new Set(ids).size!==ids.length)
+  throw Error('В одном кадре можно выбрать до трёх разных персонажей.');
+ const all=read(),story=all.find(s=>s.id===storyId);
+ if(!story||!Array.isArray(story.cast))throw Error('У этого проекта нет библии персонажей.');
+ const scene=story.scenes.find(s=>s.number===sceneNumber);
+ if(!scene)throw Error('Сцена не найдена.');
+ if(scene.imageUri)throw Error('Кадр уже нарисован. Старое изображение и описание не меняем.');
+ if(!scene.sourcePrompt)throw Error('Нет исходного описания. Старый кадр сохранён.');
+ const cast=ids.map(id=>{
+  const actor=story.cast.find(x=>x.id===id);
+  if(!actor)throw Error('Персонаж не найден в составе этого эпизода.');
+  return actor;
+ });
+ scene.castIds=ids.slice();
+ if(ids.length!==1)scene.referenceEnabled=false;
+ scene.prompt=castPrompt(scene.sourcePrompt,cast,story.style);
+ if(!write(all))throw Error('Не удалось сохранить изменения состава сцены.');
+ return scene;
 }
 
 function read(){
@@ -126,7 +238,8 @@ function exportBackup() {
  return JSON.stringify({
    format:'NOVA_STORIES_V1',version:1,
    exportedAt:new Date().toISOString(),
-   stories:read()
+   stories:read(),
+   ...(root.NovaCharacterBible?{characterBible:root.NovaCharacterBible.read()}:{})
  });
 }
 function validBackupStory(item) {
@@ -146,6 +259,12 @@ function mergeBackup(payload) {
     !Array.isArray(archive.stories) || archive.stories.length>2500 ||
     !archive.stories.every(validBackupStory))
    throw Error('Неверный формат копии NOVA. Ничего не изменено.');
+ // Old V1 archives without a character bible remain supported.
+ const library=root.NovaCharacterBible;
+ if(archive.characterBible){
+  if(!library?.validateBackup)throw Error('Библия сериала недоступна, восстановление отменено.');
+  library.validateBackup(archive.characterBible);
+ }
  const existing=read();
  const seen=new Set(existing.map(item=>item.id));
  const additions=[];
@@ -159,7 +278,14 @@ function mergeBackup(payload) {
  // untouched on a parse error, invalid data, or storage quota failure.
  if(additions.length && !write(existing.concat(additions)))
    throw Error('Мало памяти для восстановления. Старые истории не изменены.');
+ try {
+  if(archive.characterBible)library.mergeBackup(archive.characterBible);
+ } catch(e) {
+  // Best-effort rollback if the separate character-library write fails.
+  if(additions.length)write(existing);
+  throw e;
+ }
  return {added:additions.length,skipped,total:existing.length+additions.length};
 }
-root.NovaStoryDirector=Object.freeze({ideaRequest,continuationRequest,appendContinuation,parse,read,write,exportBackup,mergeBackup});
+root.NovaStoryDirector=Object.freeze({artStyles,detectArtStyle,ideaRequest,continuationRequest,appendContinuation,parse,bindSeries,setSceneCast,read,write,exportBackup,mergeBackup});
 })(typeof window !== 'undefined' ? window : globalThis);

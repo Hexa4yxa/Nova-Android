@@ -22,10 +22,21 @@ const voicedVideo='content://media/external/video/media/1001';
 function setup(voices=true){
  const store=new Map();
  const localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))};
- const calls={voice:[],motion:[]};
+ const calls={voice:[],motion:[],previews:[]};
  const nativeVoice={
-  status:async()=>({available:voices,count:voices?2:0,voices:voices?[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]:[],detail:voices?'local':'No installed offline voices'}),
-  dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};}
+  status:async({engineId}={})=>{
+    const multi=engineId==='dev.ahmedmohamed.hayaitts';
+    const entries=voices?(multi
+      ?Array.from({length:10},(_,i)=>({id:'vits-supertonic#'+i+'#speaker_'+i,
+          label:'Supertonic · speaker_'+i,language:'ru/uk'}))
+      :[{id:'ru-offline',language:'ru'},{id:'ru-offline-2',language:'ru'}]):[];
+    return {available:entries.length>0,count:entries.length,voices:entries,
+      engine:engineId||'com.google.android.tts',
+      engines:[{id:'dev.ahmedmohamed.hayaitts',label:'HayaiTTS'}],
+      detail:voices?'local':'No installed offline voices'};
+   },
+  dubMovie:async x=>{calls.voice.push(x);return {saved:true,videoUri:voicedVideo,distinctCharacterVoice:true,audio:true};},
+  preview:async x=>{calls.previews.push(x);return {started:true,voice:x.voiceId||'ru-offline'};}
  };
  const nativeMotion={
   render:async x=>{calls.motion.push(x);return {saved:true,videoUri:silentVideo,seconds:12};},
@@ -51,7 +62,15 @@ function setup(voices=true){
  };
  director.write([project]);
  const content=new Element('main');
- const api={content,brain:{},isBusy:()=>false,generate:async()=>{},resumeStory:async()=>{}};
+ const brain={
+  status:async()=>({engine:'ModelReady'}),
+  chat:async()=>({answer:JSON.stringify({lines:[
+   'Шторм заглушал шаги за его спиной.',
+   'В темноте он услышал знакомый голос.',
+   'И понял: это говорил он сам.'
+  ]})})
+ };
+ const api={content,brain,isBusy:()=>false,generate:async()=>{},resumeStory:async()=>{}};
  const render=()=>window.NovaStoryUI.render(api);
  const button=text=>flatten(content).find(n=>n.tagName==='BUTTON'&&n.textContent.includes(text));
  return {director,content,render,button,calls};
@@ -66,17 +85,36 @@ test('NOVA creates voiced MP4 after the existing panel-by-panel motion render',a
  const lines=x.calls.voice[0].lines;
  assert.equal(lines.length,3);
  assert.equal(lines[0].speaker,'narrator');
- assert.equal(lines[0].effect,'rain');
- assert.equal(lines[1].speaker,'character');
- assert.equal(lines[1].text,'Кто там?');
- assert.equal(lines[2].effect,'torch');
+ assert.equal(lines[0].effect,'none'); // The visual rain is never converted to hiss.
+ assert.equal(lines[1].speaker,'narrator');
+ assert.equal(lines[1].text,'В темноте он услышал знакомый голос.');
+ assert.equal(lines[2].effect,'none');
  const story=x.director.read()[0];
  assert.equal(story.movieUri,voicedVideo);
  assert.equal(story.movieHasAudio,true);
+ assert.deepEqual(Array.from(story.narrationDraft),[
+  'Шторм заглушал шаги за его спиной.',
+  'В темноте он услышал знакомый голос.',
+  'И понял: это говорил он сам.'
+ ]);
+ assert.ok(flatten(x.content).some(n=>n.tagName==='SUMMARY'&&
+  n.textContent.includes('Сценарий озвучки')));
  assert.deepEqual(Array.from(story.scenes.map(s=>s.imageUri)),imageUris);
  assert.equal(story.comicPageUri,comicPage);
 });
 
+test('audio settings default to dry narration and never infer rain from repeated prompt words',async()=>{
+ const x=setup();x.render();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice.length,1);
+ assert.ok(x.calls.voice[0].lines.every(line=>line.effect==='none'));
+ const project=x.director.read()[0];
+ assert.notEqual(project.enableAudioEffects,true);
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/story\.enableAudioEffects===true/);
+ assert.match(ui,/story\.scenes\[index\]\?\.audioEffect/);
+ assert.doesNotMatch(ui,/effect:shots\[index\]\.effect/);
+});
 test('missing offline voice does not remove the finished silent MP4',async()=>{
  const x=setup(false);x.render();
  await x.button('Читать комикс в MP4').onclick();
@@ -91,18 +129,27 @@ test('user can keep an optional character line without changing storyboard',()=>
  assert.ok(details);
  const input=flatten(x.content).find(n=>n.tagName==='TEXTAREA'&&n.attributes['aria-label']==='Текст озвучки сцены 1');
  assert.ok(input);
+ assert.equal(input.value,''); // Do NOT prefill with an inaccurate scene description.
  input.value='Нам нужно вернуться!';
  const save=x.button('Сохранить реплику');
  save.onclick();
  const after=x.director.read()[0];
  assert.equal(after.scenes[0].voiceText,'Нам нужно вернуться!');
  assert.equal(after.scenes[0].imageUri,imageUris[0]);
+ x.render();
+ const updated=flatten(x.content).find(n=>n.tagName==='TEXTAREA'&&
+  n.attributes['aria-label']==='Текст озвучки сцены 1');
+ assert.equal(updated.value,'Нам нужно вернуться!');
+ updated.value='';
+ x.button('Сохранить реплику').onclick();
+ assert.equal(x.director.read()[0].scenes[0].voiceText,'');
+ assert.equal(x.director.read()[0].scenes[0].imageUri,imageUris[0]);
 });
 
 test('Android native speech is explicitly offline and muxes AAC with untouched H264 video',()=>{
  const text=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
  const activity=fs.readFileSync('android/app/src/main/java/ai/nova/director/MainActivity.java','utf8');
- assert.match(text,/!it\.isNetworkConnectionRequired/);
+ assert.match(text,/!voice\.isNetworkConnectionRequired/);
  assert.match(text,/synthesizeToFile\(/);
  assert.match(text,/MediaFormat\.MIMETYPE_AUDIO_AAC/);
  assert.match(text,/MediaMuxer\(/);
@@ -112,4 +159,99 @@ test('Android native speech is explicitly offline and muxes AAC with untouched H
  assert.match(text,/torch/);
  assert.match(text,/fog/);
  assert.match(activity,/registerPlugin\(NovaVoicePlugin\.class\)/);
+});
+
+
+test('a chosen offline voice is previewed, saved and passed to Android TTS during MP4 export',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ const selects=flatten(x.content).filter(n=>n.tagName==='SELECT');
+ const choice=selects.find(n=>n.children.some(option=>option.value==='ru-offline-2'));
+ assert.ok(choice);
+ choice.value='ru-offline-2';
+ await x.button('Послушать голос').onclick();
+ assert.equal(x.calls.previews[0].voiceId,'ru-offline-2');
+ // render created fresh controls; repeat selection to save
+ const savedPicker=flatten(x.content).filter(n=>n.tagName==='SELECT')
+  .find(n=>n.children.some(option=>option.value==='ru-offline-2'));
+ savedPicker.value='ru-offline-2';
+ x.button('Выбрать голос').onclick();
+ assert.equal(x.director.read()[0].voiceId,'ru-offline-2');
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].voiceId,'ru-offline-2');
+});
+
+test('per-project offline TTS engine is passed through inspection, preview and final movie export',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ // The test engine advertises an installed neural TTS service.
+ const ui=fs.readFileSync('src/nova_story_ui.js','utf8');
+ assert.match(ui,/voice\.status\(\{engineId:story\.voiceEngineId\|\|''\}\)/);
+ assert.match(ui,/current\.voiceEngineId=enginePick\.value/);
+ assert.match(ui,/engineId:enginePick\.value/);
+ assert.match(ui,/engineId:story\.voiceEngineId\|\|''/);
+ const p=x.director.read()[0];
+ p.voiceEngineId='dev.ahmedmohamed.hayaitts';
+ x.director.write([p]);
+ x.render();
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].engineId,'dev.ahmedmohamed.hayaitts');
+ assert.equal(x.director.read()[0].scenes.length,3);
+});
+test('Android uses installed engines only, waits for preview and shuts down temporary TTS',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/original\.engines\.any \{ it\.name==requested \}/);
+ assert.match(native,/TextToSpeech\(context,\{ code ->/);
+ assert.match(native,/check\(initialized\)/);
+ assert.doesNotMatch(native,/currentEngine/);
+ assert.match(native,/chosen\.shutdown\(\)/);
+ assert.match(native,/put\("engines",JSArray\(\)/);
+ assert.match(native,/val voices=localVoices\(t,call\.getString\("engineId"\)\)/);
+ assert.match(native,/withTimeoutOrNull\(30000\)\{completed\.await\(\)\}/);
+});
+
+test('Android TTS accepts only an installed local voice in the selected language',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/val voiceId=call\.getString\("voiceId"\)/);
+ assert.match(native,/val narrator=if\(voiceId\.isNotEmpty\(\)\)/);
+ assert.match(native,/voices\.firstOrNull \{ it\.name==voiceId \}/);
+ assert.match(native,/!voice\.isNetworkConnectionRequired/);
+});
+
+test('NOVA lists all 10 installed Supertonic speakers and passes selected speaker to preview and render',async()=>{
+ const x=setup();x.render();
+ await x.button('Проверить голоса телефона').onclick();
+ const engine=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='dev.ahmedmohamed.hayaitts'));
+ assert.ok(engine);
+ engine.value='dev.ahmedmohamed.hayaitts';
+ await engine.onchange();
+ const picker=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='vits-supertonic#7#speaker_7'));
+ assert.ok(picker);
+ assert.equal(picker.children.filter(o=>o.value.startsWith('vits-supertonic')).length,10);
+ picker.value='vits-supertonic#7#speaker_7';
+ await x.button('Послушать голос').onclick();
+ assert.equal(x.calls.previews[0].voiceId,'vits-supertonic#7#speaker_7');
+ assert.equal(x.calls.previews[0].engineId,'dev.ahmedmohamed.hayaitts');
+ const again=flatten(x.content).find(n=>n.tagName==='SELECT' &&
+  n.children.some(o=>o.value==='vits-supertonic#7#speaker_7'));
+ again.value='vits-supertonic#7#speaker_7';
+ x.button('Выбрать голос').onclick();
+ assert.equal(x.director.read()[0].voiceId,'vits-supertonic#7#speaker_7');
+ await x.button('Читать комикс в MP4').onclick();
+ assert.equal(x.calls.voice[0].voiceId,'vits-supertonic#7#speaker_7');
+ assert.equal(x.calls.voice[0].engineId,'dev.ahmedmohamed.hayaitts');
+});
+test('NOVA overrides framework first-language locale for multi-language Supertonic audio',()=>{
+ const native=fs.readFileSync('android/app/src/main/java/ai/nova/director/NovaVoicePlugin.kt','utf8');
+ assert.match(native,/voice\.name\.contains\("supertonic", ignoreCase = true\)/);
+ assert.match(native,/isHayai\(effectiveEngineId\) && isSupertonic\(voice\)/);
+  assert.match(native,/engineId\?\.trim\(\)\?\.takeIf \{ it\.isNotEmpty\(\) \} \?: t\.defaultEngine/);
+ assert.match(native,/putString\("language", if\(language=="uk"\) "ukr" else "rus"\)/);
+ assert.match(native,/putString\("country", if\(language=="uk"\) "UKR" else "RUS"\)/);
+ assert.match(native,/t\.speak\(line,TextToSpeech\.QUEUE_FLUSH,voiceParams\(voice,lang\),id\)/);
+ assert.match(native,/synthesizeToFile\(text,voiceParams\(voice,language\),file,id\)/);
+  assert.doesNotMatch(native,/TextToSpeech\.Engine\.KEY_PARAM_LANGUAGE/);
+  assert.match(native,/put\("rawVoiceCount",t\.voices\?\.size \?: 0\)/);
 });
