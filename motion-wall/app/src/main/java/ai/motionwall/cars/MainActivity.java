@@ -23,9 +23,10 @@ import android.widget.Toast;
 /** One photo, one selected effect, one Android wallpaper confirmation. */
 public final class MainActivity extends Activity {
     private static final int PICK_PHOTO=51;
+    private static final int PICK_VIDEO=52;
     private PreviewView preview;
     private TextView status;
-    private Button chooseButton,applyButton;
+    private Button chooseButton,applyButton,chooseVideoButton,applyVideoButton;
     private Button nightButton,rainButton,neonButton;
     private TextView strengthCaption;
     private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
@@ -96,6 +97,20 @@ public final class MainActivity extends Activity {
         applyButton=button("2 · Установить живые обои",true);
         addWithMargin(column,applyButton,0,dp(10),0,0);
         applyButton.setOnClickListener(v->applyWallpaper());
+
+        // A real video is visibly different from animated photo effects.
+        // Prove smooth wallpaper playback before wiring any paid AI generator.
+        addWithMargin(column,label("НАСТОЯЩЕЕ ДВИЖЕНИЕ · MP4",12,
+            Color.rgb(178,153,255),true),0,dp(24),0,dp(6));
+        addWithMargin(column,label("Импортируй готовое видео, где машина действительно едет. Пока без генерации AI.",
+            13,Color.rgb(181,189,207),false),0,0,0,dp(8));
+        chooseVideoButton=button("3 · Выбрать видео машины (MP4)",false);
+        addWithMargin(column,chooseVideoButton,0,dp(4),0,0);
+        chooseVideoButton.setOnClickListener(v->pickVideo());
+        applyVideoButton=button("4 · Установить видеообои",true);
+        addWithMargin(column,applyVideoButton,0,dp(10),0,0);
+        applyVideoButton.setOnClickListener(v->applyVideoWallpaper());
+        applyVideoButton.setEnabled(VideoClipStore.get(this)!=null);
         status=label("",13,Color.rgb(181,189,207),false);
         status.setGravity(Gravity.CENTER_HORIZONTAL);
         addWithMargin(column,status,0,dp(10),0,0);
@@ -148,6 +163,22 @@ public final class MainActivity extends Activity {
         bg.setCornerRadius(dp(16));result.setBackground(bg);
         result.setMinHeight(dp(60));return result;
     }
+    private void pickVideo(){
+        if(busy)return;
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/mp4");
+        try{startActivityForResult(intent,PICK_VIDEO);}
+        catch(Exception e){status.setText("Не удалось открыть видео: "+e.getMessage());}
+    }
+    private void applyVideoWallpaper(){
+        if(VideoClipStore.get(this)==null){status.setText("Сначала выбери настоящее MP4.");return;}
+        Intent intent=new Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER);
+        intent.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+            new ComponentName(this,MotionVideoWallpaperService.class));
+        try{startActivity(intent);}
+        catch(Exception e){status.setText("Android не открыл видеообои: "+e.getMessage());}
+    }
     private void pickPhoto(){
         if(busy)return;
         Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -158,8 +189,36 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==PICK_VIDEO&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
+            busy=true;
+            chooseButton.setEnabled(false);
+            chooseVideoButton.setEnabled(false);
+            applyButton.setEnabled(false);
+            applyVideoButton.setEnabled(false);
+            status.setText("Проверяю и сохраняю настоящее MP4...");
+            final android.net.Uri video=data.getData();
+            new Thread(()->{
+                String error=null;
+                try{VideoClipStore.importVideo(getApplicationContext(),video);}
+                catch(Exception e){error=e.getMessage();}
+                final String finalError=error;
+                runOnUiThread(()->{
+                    busy=false;
+                    chooseButton.setEnabled(true);
+                    chooseVideoButton.setEnabled(true);
+                    boolean loaded=VideoClipStore.get(this)!=null;
+                    applyVideoButton.setEnabled(loaded);
+                    applyButton.setEnabled(preview.hasPhoto());
+                    status.setText(finalError==null?
+                        "✅ MP4 сохранён локально. Можно установить настоящие видеообои.":
+                        "Ошибка MP4: "+finalError);
+                });
+            },"motion-wall-video-import").start();
+            return;
+        }
         if(requestCode!=PICK_PHOTO||resultCode!=RESULT_OK||data==null||data.getData()==null)return;
         busy=true;chooseButton.setEnabled(false);applyButton.setEnabled(false);
+        chooseVideoButton.setEnabled(false);applyVideoButton.setEnabled(false);
         status.setText("Подготавливаю фотографию...");
         final android.net.Uri photo=data.getData();
         new Thread(()->{
@@ -169,6 +228,8 @@ public final class MainActivity extends Activity {
             final String failed=error;
             runOnUiThread(()->{
                 busy=false;chooseButton.setEnabled(true);
+                chooseVideoButton.setEnabled(true);
+                applyVideoButton.setEnabled(VideoClipStore.get(this)!=null);
                 if(failed==null){
                     refreshPhoto();Toast.makeText(this,"Фотография готова",Toast.LENGTH_SHORT).show();
                 }else{
