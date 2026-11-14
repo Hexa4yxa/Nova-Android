@@ -210,6 +210,7 @@ function setSceneCast(storyId,sceneNumber,ids) {
   return actor;
  });
  scene.castIds=ids.slice();
+ if(ids.length!==1)scene.referenceEnabled=false;
  scene.prompt=castPrompt(scene.sourcePrompt,cast,story.style);
  if(!write(all))throw Error('Не удалось сохранить изменения состава сцены.');
  return scene;
