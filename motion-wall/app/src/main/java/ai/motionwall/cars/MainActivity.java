@@ -14,6 +14,7 @@ import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -28,6 +29,7 @@ public final class MainActivity extends Activity {
     private static final int PICK_VIDEO=52;
     private PreviewView preview;
     private VideoView videoPreview;
+    private TextView videoPlaceholder;
     private boolean videoPreviewOn;
     private TextView status;
     private Button chooseButton,applyButton,chooseVideoButton,applyVideoButton,videoPreviewButton;
@@ -57,15 +59,23 @@ public final class MainActivity extends Activity {
         // True video preview is first. Old photo-only effects are now secondary.
         LinearLayout videoSection=new LinearLayout(this);
         videoSection.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout videoFrame=new FrameLayout(this);
+        videoFrame.setBackgroundColor(Color.rgb(12,16,32));
         videoPreview=new VideoView(this);
-        videoPreview.setBackgroundColor(Color.rgb(12,16,32));
-        videoSection.addView(videoPreview,new LinearLayout.LayoutParams(-1,dp(330)));
+        videoFrame.addView(videoPreview,new FrameLayout.LayoutParams(-1,-1));
+        videoPlaceholder=label("🎬\\n\\nЗдесь появится настоящее движущееся видео\\n\\nВыбери MP4 или бесплатный пример",
+            16,Color.rgb(166,181,208),false);
+        videoPlaceholder.setGravity(Gravity.CENTER);
+        videoPlaceholder.setPadding(dp(18),dp(12),dp(18),dp(12));
+        videoFrame.addView(videoPlaceholder,new FrameLayout.LayoutParams(-1,-1));
+        videoSection.addView(videoFrame,new LinearLayout.LayoutParams(-1,dp(330)));
         videoPreview.setOnPreparedListener(player->{
             player.setLooping(true);
             player.setVolume(0f,0f);
             if(videoPreviewOn)videoPreview.start();
         });
         videoPreview.setOnErrorListener((player,what,extra)->{
+            if(videoPlaceholder!=null)videoPlaceholder.setVisibility(View.VISIBLE);
             if(status!=null)status.setText("⚠ Не удалось воспроизвести этот MP4. Попробуй H.264.");
             return true;
         });
@@ -301,6 +311,7 @@ public final class MainActivity extends Activity {
         File file=VideoClipStore.get(this);
         if(file==null){if(status!=null)status.setText("Сначала выбери MP4.");return;}
         videoPreviewOn=true;
+        if(videoPlaceholder!=null)videoPlaceholder.setVisibility(View.GONE);
         videoPreviewButton.setEnabled(true);
         videoPreview.setVideoPath(file.getAbsolutePath());
         videoPreview.requestFocus();
