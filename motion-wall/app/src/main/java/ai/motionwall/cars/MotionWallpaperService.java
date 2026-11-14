@@ -16,9 +16,12 @@ public final class MotionWallpaperService extends WallpaperService {
     private final class RideEngine extends Engine {
         private final Handler handler=new Handler(Looper.getMainLooper());
         private final NightRideRenderer renderer=new NightRideRenderer();
+        private final DriveSceneRenderer driveRenderer=new DriveSceneRenderer();
         private final SharedPreferences prefs=getSharedPreferences(PhotoStore.PREFS,MODE_PRIVATE);
         private final SharedPreferences.OnSharedPreferenceChangeListener listener=(p,key)->{
             if(PhotoStore.IMAGE_KEY.equals(key))handler.post(this::reload);
+            if(CarCutoutStore.CUTOUT_KEY.equals(key)||CarCutoutStore.SOURCE_KEY.equals(key))
+                handler.post(this::reloadCar);
             if(MotionSettings.MODE_KEY.equals(key)||MotionSettings.STRENGTH_KEY.equals(key)) {
                 handler.post(()->{
                     settings=MotionSettings.read(MotionWallpaperService.this);
@@ -27,7 +30,7 @@ public final class MotionWallpaperService extends WallpaperService {
             }
         };
         private final Runnable nextFrame=this::render;
-        private Bitmap image;
+        private Bitmap image,carCutout;
         private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
         private PowerManager power;
         // Software fallback is only chosen when lockHardwareCanvas fails.
@@ -44,10 +47,19 @@ public final class MotionWallpaperService extends WallpaperService {
             power=(PowerManager)getSystemService(POWER_SERVICE);
             reload();
         }
+        private void reloadCar(){
+            if(destroyed)return;
+            Bitmap old=carCutout;
+            carCutout=CarCutoutStore.load(MotionWallpaperService.this);
+            driveRenderer.release();
+            if(old!=null&&old!=carCutout&&!old.isRecycled())old.recycle();
+            request();
+        }
         private void reload(){
             if(destroyed)return;
             Bitmap old=image;image=PhotoStore.load(MotionWallpaperService.this);
             if(old!=null&&old!=image&&!old.isRecycled())old.recycle();
+            reloadCar();
             request();
         }
         @Override public void onSurfaceCreated(SurfaceHolder holder){
@@ -85,8 +97,14 @@ public final class MotionWallpaperService extends WallpaperService {
                     }
                 }
                 if(softwareSurface)canvas=holder.lockCanvas();
-                if(canvas!=null)renderer.draw(canvas,canvas.getWidth(),canvas.getHeight(),
-                    image,LoopMath.phase(SystemClock.uptimeMillis()-firstFrameTime),settings);
+                if(canvas!=null){
+                    float phase=LoopMath.phase(SystemClock.uptimeMillis()-firstFrameTime);
+                    if(MotionSettings.DRIVE.equals(settings.mode)&&carCutout!=null)
+                        driveRenderer.draw(canvas,canvas.getWidth(),canvas.getHeight(),
+                            carCutout,phase,settings.strength);
+                    else renderer.draw(canvas,canvas.getWidth(),canvas.getHeight(),
+                        image,phase,settings);
+                }
             }catch(Exception ignored){ /* surface may be closing during a frame */ }
             finally{if(canvas!=null)try{holder.unlockCanvasAndPost(canvas);}catch(Exception ignored){}}
             boolean saving=power!=null&&power.isPowerSaveMode();
@@ -100,8 +118,10 @@ public final class MotionWallpaperService extends WallpaperService {
             handler.removeCallbacksAndMessages(null);
             prefs.unregisterOnSharedPreferenceChangeListener(listener);
             renderer.release();
+            driveRenderer.release();
             if(image!=null&&!image.isRecycled())image.recycle();
-            image=null;super.onDestroy();
+            if(carCutout!=null&&!carCutout.isRecycled())carCutout.recycle();
+            image=null;carCutout=null;super.onDestroy();
         }
     }
 }
