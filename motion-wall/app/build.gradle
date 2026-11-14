@@ -9,7 +9,29 @@ android {
         versionCode 2
         versionName '0.2-candidate'
     }
-    buildTypes { release { minifyEnabled false } }
+    // Re-use the owner's already pinned, permanent key from existing NOVA
+    // infrastructure. The app has a distinct package ID and zero NOVA code.
+    // This only signs when CI injects the key; debug builds stay isolated.
+    signingConfigs {
+        wallPermanent {
+            def path = System.getenv('MOTION_WALL_KEYSTORE_PATH')
+            if (path) {
+                storeFile file(path)
+                storeType 'pkcs12'
+                storePassword System.getenv('NOVA_SIGNING_PASSWORD')
+                keyAlias 'nova-stable'
+                keyPassword System.getenv('NOVA_SIGNING_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv('MOTION_WALL_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.wallPermanent
+            }
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
