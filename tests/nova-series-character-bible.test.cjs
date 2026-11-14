@@ -138,7 +138,7 @@ test('casting recognises inflected names but never treats a bare mirror as an an
   appearance:'short silver hair, pale skin and red winter coat'});
  const scenes=[
   {beat:'Марк видит зеркало в пустой комнате.'},
-  {beat:'Марк протягивает руку к Лие, а двойник ждёт.'},
+  {beat:'Марк протягивает руку к Лии, а двойник ждёт.'},
   {beat:'Марк пытается удержать Лию, отражение смотрит на него.'}
  ].map((scene,i)=>({...scene,number:i+1,
   sourcePrompt:'A cinematic mirror portrait in a lonely room with dramatic midnight shadows.',
