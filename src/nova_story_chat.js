@@ -9,11 +9,58 @@
   if(typeof text!=='string')return false;
   const story=/(?:истори|історі|сказк|казк|сюжет|сценари|сценарі)/iu.test(text);
   const pictures=/(?:картин|изображени|зображенн|малюн|рисунк|иллюстрац|ілюстрац|кадр)/iu.test(text);
-  const action=/(?:придумай|сочини|напиши|создай|сделай|вигад|створи|зроби|намалюй|нарисуй|сгенерируй)/iu.test(text);
+  // "Подготовь шесть кадров" is a storyboard request, not permission to render.
+  const explicitRender=/(?:нарисуй|намалюй|нарисовать|намалювати|сгенерируй|згенеруй|рисуй|малюй)|(?:создай|сделай|зроби|створи)\s+(?:(?:к\s+ним|для\s+не[её]|мне|сразу|ещ[её]|шість|шесть|6|три|3)\s+){0,4}(?:картин|изображени|зображенн|малюн|рисунк|иллюстрац|ілюстрац|кадр)/iu.test(text);
   const exclusion=/(?:без\s+(?:картин|изображени|зображенн|малюн|рисунк)|не\s+(?:рисуй|создавай|делай|генерируй|малюй|створюй)\s+(?:картин|изображени|зображенн|малюн|рисунк))/iu.test(text);
-  return story&&pictures&&action&&!exclusion;
+  return story&&pictures&&explicitRender&&!exclusion;
  }
- function saveScene(director,storyId,sceneNumber,result){
+ // Director Council is a separate native tool. Don't fake independent
+ // criticism in a one-shot chat or launch costly image rendering instead.
+ function wantsCouncilPlanning(text){
+  if(typeof text!=='string')return false;
+  return /(?:внутренн(?:им|ий|его)\s+голос|внутрішн(?:ім|ій)\s+голос|режисс[её]рск(?:ий|им)\s+совет|режисерськ(?:у|ою)\s+рад|\bcritic\b|критик)/iu.test(text)
+    && /(?:истори|історі|сценари|сценарі|сюжет|кадр|ролик|видео|відео)/iu.test(text)
+    && !wantsStoryImages(text);
+ }
+
+ // An initial model can still be Initializing, or its loading task may
+ // already be underway from app startup. Avoid overlapping prepare calls.
+ async function readyBrain(brain,onStatus=()=>{},isCancelled=()=>false){
+  const deadline=Date.now()+90000;
+  let triedPrepare=false;
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,450));
+  while(Date.now()<deadline){
+   if(isCancelled())return false;
+   const state=await brain.status();
+   if(state.engine==='ModelReady')return true;
+   if(state.engine==='Error')throw Error('Локальная модель: '+(state.detail||'ошибка движка'));
+   if(state.modelLoading || state.generating){
+    onStatus('🧠 NOVA ожидает завершения загрузки мозга...');
+    await pause();
+    continue;
+   }
+   if(!triedPrepare){
+    triedPrepare=true;
+    onStatus('🧠 NOVA запускает локальную модель...');
+    try{await brain.prepare();}
+    catch(error){
+     // Another bridge call can win the race after status() is read.
+     if(!/уже загружает|already|пока занят|Initializing/i.test(String(error?.message||error)))throw error;
+    }
+    continue;
+   }
+   onStatus('🧠 Жду готовности локального движка...');
+   await pause();
+  }
+  throw Error('Движок NOVA не стал готов за 90 секунд. Проверь «Ещё → Мозги»; проекты не удалены.');
+ }
+ // The native image plugin saves PNGs to Android MediaStore. Never mark a
+ // scene complete when its bridge response lacks a usable saved-image URI.
+ function savedImageUri(result){
+  return result?.saved===true && typeof result.imageUri==='string' &&
+   /^content:\/\/media\/[^/?]+\/images\/media\/[0-9]+$/i.test(result.imageUri);
+ }
+ function saveScene(director,storyId,sceneNumber,result,expectedPrompt){
   // Reload current records before changing one: no clearing, slicing or
   // replacing unrelated owner stories. A failed write must halt the job.
   const entries=director.read();
@@ -22,8 +69,17 @@
   const story=entries[index];
   const scene=story.scenes.find(s=>s.number===sceneNumber);
   if(!scene)throw Error('Не найдена сцена проекта. PNG остаётся в Галерее.');
-  scene.imageUri=result.imageUri||'saved';
+  // The native renderer can take many minutes. Never replace a newer,
+  // already completed frame or attach an old render to an edited prompt.
+  if(scene.imageUri)
+   throw Error('Кадр '+sceneNumber+' уже сохранён другим процессом. Старый PNG не заменён; новый остаётся в Галерее.');
+  if(scene.prompt!==expectedPrompt)
+   throw Error('Описание кадра '+sceneNumber+' изменилось во время рисования. Новый PNG остаётся в Галерее, проект не перезаписан.');
+  scene.imageUri=result.imageUri;
   scene.renderSeconds=Number(result.elapsedSeconds)||0;
+  scene.modelLoadMs=Number(result.modelLoadMs)||0;
+  scene.samplingMs=Number(result.samplingMs)||0;
+  scene.referenceApplied=!!result.referenceApplied;
   if(!director.write(entries))throw Error('Кадр готов, но не получилось обновить проект. PNG остаётся в Галерее.');
  }
  async function run(options){
@@ -35,12 +91,12 @@
   if(isCancelled())return {cancelled:true,completed:0};
   const idea=String(text||'').trim();
   onStatus('🧠 NOVA создаёт раскадровку и промпты...');
-  const state=await brain.status();
-  if(state.engine!=='ModelReady')await brain.prepare();
+  if(!(await readyBrain(brain,onStatus,isCancelled)))return {cancelled:true,completed:0};
   if(isCancelled())return {cancelled:true,completed:0};
-  const plan=await brain.chat({message:director.ideaRequest(idea,3),maxTokens:512});
+  const styleId=director.detectArtStyle(idea);
+  const plan=await brain.chat({message:director.ideaRequest(idea,3,'',styleId),maxTokens:512});
   if(isCancelled())return {cancelled:true,completed:0};
-  const first=director.parse(plan?.answer,idea);
+  const first=director.parse(plan?.answer,idea,styleId);
   let story=first;
   if(sceneCount===6){
    onStatus('🧠 Сцены 1–3 готовы, NOVA планирует сцены 4–6...');
@@ -60,24 +116,37 @@
  // The Android WebView can be recreated after a long CPU render. Recover by
  // reading the durable Projects checkpoint, not by regenerating the story.
  async function renderRemaining({director,story,generate,onStatus,onFrame,isCancelled}){
-  let completed=story.scenes.filter(scene=>!!scene.imageUri).length;
-  for(const scene of story.scenes){
-   // Ignore already exported PNGs. Never spend another hour on finished frames.
+  const storyId=story.id;
+  const sceneNumbers=story.scenes.map(scene=>scene.number);
+  // A render can last many minutes. Refresh before EVERY frame: another screen
+  // may have completed a later PNG or edited its prompt while we were busy.
+  const latest=()=>{
+   const current=director.read().find(item=>item.id===storyId);
+   if(!current)throw Error('Проект был удалён во время рисования. PNG остаются в Галерее.');
+   return current;
+  };
+  for(const number of sceneNumbers){
+   const current=latest();
+   const scene=current.scenes.find(item=>item.number===number);
+   if(!scene)throw Error('Сцена '+number+' изменилась. Генерация остановлена без удаления кадров.');
+   const completed=current.scenes.filter(item=>!!item.imageUri).length;
+   // Never rerender an externally completed frame based on a stale snapshot.
    if(scene.imageUri)continue;
-   if(isCancelled())return {cancelled:true,completed,total:story.scenes.length,story};
-   onStatus('🎨 Рисую кадр '+scene.number+' из '+story.scenes.length+'...');
+   if(isCancelled())return {cancelled:true,completed,total:current.scenes.length,story:current};
+   onStatus('🎨 Рисую кадр '+number+' из '+current.scenes.length+'...');
    const result=await generate(scene.prompt,progress=>{
-    onStatus('Кадр '+scene.number+' из '+story.scenes.length+': '+progress);
-   });
-   if(!result?.saved)throw Error('Генератор не подтвердил сохранение кадра '+scene.number+'.');
-   saveScene(director,story.id,scene.number,result);
-   // Keep this in-memory scene current too, for follow-up iteration guards.
-   scene.imageUri=result.imageUri||'saved';
-   scene.renderSeconds=Number(result.elapsedSeconds)||0;
-   completed++;
-   onFrame({scene,result,completed,total:story.scenes.length,story});
+    onStatus('Кадр '+number+' из '+current.scenes.length+': '+progress);
+   },scene,current);
+   if(!savedImageUri(result))throw Error('Генератор не подтвердил сохранение PNG кадра '+number+' в Галерее. Готовые кадры не изменены.');
+   saveScene(director,storyId,number,result,scene.prompt);
+   const saved=latest();
+   const savedScene=saved.scenes.find(item=>item.number===number);
+   const savedCount=saved.scenes.filter(item=>!!item.imageUri).length;
+   onFrame({scene:savedScene,result,completed:savedCount,total:saved.scenes.length,story:saved});
   }
-  return {cancelled:false,completed,total:story.scenes.length,story};
+  const finished=latest();
+  return {cancelled:false,completed:finished.scenes.filter(item=>!!item.imageUri).length,
+   total:finished.scenes.length,story:finished};
  }
  async function resumeExisting(options){
   const {storyId,generate,onStatus=()=>{},onFrame=()=>{},
@@ -90,5 +159,5 @@
   onStatus('📂 Продолжаю историю «'+story.title+'» с первого несозданного кадра...');
   return await renderRemaining({director,story,generate,onStatus,onFrame,isCancelled});
  }
- root.NovaStoryChat=Object.freeze({wantsStoryImages,run,resumeExisting});
+ root.NovaStoryChat=Object.freeze({wantsStoryImages,wantsCouncilPlanning,readyBrain,run,resumeExisting});
 })(typeof window!=='undefined'?window:globalThis);

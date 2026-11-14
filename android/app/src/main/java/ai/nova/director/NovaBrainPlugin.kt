@@ -20,6 +20,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -94,6 +96,22 @@ class NovaBrainPlugin : Plugin() {
         }
     }
 
+    /**
+     * AiChat initializes asynchronously on Android. Loading a GGUF while
+     * InferenceEngine is still Initializing causes a spurious "engine busy"
+     * failure. Do not spin on the UI thread or race a second model load.
+     */
+    private suspend fun awaitEngineInitialization() {
+        if (brain.state() != "Initializing") return
+        val initialized = withTimeoutOrNull(30_000L) {
+            while (brain.state() == "Initializing") delay(300L)
+            true
+        } == true
+        check(initialized) {
+            "ИИ-движок не завершил инициализацию за 30 секунд. Повтори запуск модели."
+        }
+    }
+
     private suspend fun activateModel(id: String) {
         val file = resolveModel(id) ?: error("Модель не найдена в памяти NOVA")
         checkGguf(file)
@@ -101,6 +119,7 @@ class NovaBrainPlugin : Plugin() {
         val previousId = activeModelId.takeIf { it.isNotEmpty() }
         val oldReady = brain.state() == "ModelReady"
         try {
+            awaitEngineInitialization()
             when (brain.state()) {
                 "ModelReady", "Error" -> brain.unloadModel()
                 "Initialized" -> Unit
@@ -702,7 +721,7 @@ class NovaBrainPlugin : Plugin() {
                 ) { token -> emitCouncilToken(requestId, "final", token) }
                 ensureRunning()
 
-                val checks = NovaCouncilPrompts.checkText(finalPlan)
+                val checks = NovaCouncilPrompts.checkText(finalPlan, task)
                 saveCouncil(task, plan, review, finalPlan, checks)
 
                 val response = JSObject()

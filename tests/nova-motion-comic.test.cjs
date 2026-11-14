@@ -44,7 +44,7 @@ function environment(withMotion=true,uri='content://media/external/images/media/
   const api={content,brain:{},isBusy:()=>false,generate:async()=>{},resumeStory:async()=>{}};
   const render=()=>window.NovaStoryUI.render(api);
   const button=label=>descend(content).find(n=>n.tagName==='BUTTON'&&n.textContent.includes(label));
-  return {calls,director,content,render,button};
+  return {calls,director,content,render,button,handoff:window.NovaStoryUI.prefillCouncil};
 }
 
 test('ready PNGs offer real motion comic export, not automatic image generation',async()=>{
@@ -101,5 +101,25 @@ test('video capability is truthful for both available and missing native bridge'
  assert.match(withMotion,/видеокомикс MP4/);
  assert.match(withMotion,/Озвучка/);
  const without=await registry.describeCapability(route,{});
- assert.match(without,/ещё не подключён/);
+ assert.match(without,/ещё не подключён|недоступен/);
+});
+
+test('Council handoff pre-fills Projects without triggering image generation or deleting prior stories',()=>{
+ const x=environment();
+ const before=JSON.stringify(x.director.read());
+ const idea='Герой замечает что отражение в зеркале не повторяет его движения';
+ const plan='Формат 9:16, 30 секунд. 0–3: взгляд. 3–10: зеркало. 10–20: отражение. 20–30: финал.';
+ assert.equal(x.handoff(idea,plan),true);
+ assert.equal(JSON.stringify(x.director.read()),before);
+ assert.equal(x.calls.renders.length,0);
+ x.render();
+ const editor=descend(x.content).find(el=>el.tagName==='TEXTAREA');
+ assert.equal(editor.value,idea);
+ assert.match(descend(x.content).map(el=>el.textContent).join(' '),/перенесены/);
+ const source=fs.readFileSync('src/nova_story_ui.js','utf8');
+ const html=fs.readFileSync('src/index.html','utf8');
+ assert.match(source,/director\.ideaRequest\(state\.idea,3,state\.councilBrief,chosenStyle,seriesCast\)/);
+ assert.match(source,/story\.councilPlan=state\.councilBrief/);
+ assert.match(html,/NovaStoryUI\.prefillCouncil\(councilState\.task,councilState\.final\)/);
+ assert.match(html,/🎬 Продолжить в Проектах/);
 });

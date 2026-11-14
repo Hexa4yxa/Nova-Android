@@ -32,7 +32,7 @@ test('storyboard project checkpoint and full-quality 512x512 12 steps remain unc
  const js=read('src/index.html');
  const story=read('src/nova_story_chat.js');
  const director=read('src/nova_story_director.js');
- assert.match(js,/executeImageGeneration\(prompt,onProgress,512,12\)/);
+ assert.match(js,/executeImageGeneration\(prompt,onProgress,512,12,referenceOptions\(scene,story\)\)/);
  assert.match(story,/resumeExisting/);
  assert.match(director,/const KEY='nova_story_projects_v1';/);
  assert.match(director,/const existing=read\(\);/);
