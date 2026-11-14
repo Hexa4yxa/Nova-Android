@@ -19,14 +19,18 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.VideoView;
+import java.io.File;
 
 /** One photo, one selected effect, one Android wallpaper confirmation. */
 public final class MainActivity extends Activity {
     private static final int PICK_PHOTO=51;
     private static final int PICK_VIDEO=52;
     private PreviewView preview;
+    private VideoView videoPreview;
+    private boolean videoPreviewOn;
     private TextView status;
-    private Button chooseButton,applyButton,chooseVideoButton,applyVideoButton;
+    private Button chooseButton,applyButton,chooseVideoButton,applyVideoButton,videoPreviewButton;
     private Button nightButton,rainButton,neonButton;
     private TextView strengthCaption;
     private MotionSettings settings=new MotionSettings(MotionSettings.NIGHT,65);
@@ -47,17 +51,49 @@ public final class MainActivity extends Activity {
         scroll.addView(column);
         TextView eyebrow=label("MOTION WALL  /  CARS EDITION",11,Color.rgb(178,153,255),true);
         eyebrow.setLetterSpacing(.09f);column.addView(eyebrow);
-        addWithMargin(column,label("Live Car Wallpaper",29,Color.WHITE,true),0,dp(6),0,dp(4));
-        addWithMargin(column,label("Своё фото машины → живые обои. Без интернета.",
+        addWithMargin(column,label("Live Video Wallpaper",29,Color.WHITE,true),0,dp(6),0,dp(4));
+        addWithMargin(column,label("Настоящее видео на рабочем столе · бесплатно и без подписки.",
             14,Color.rgb(181,189,207),false),0,0,0,dp(12));
+        // True video preview is first. Old photo-only effects are now secondary.
+        LinearLayout videoSection=new LinearLayout(this);
+        videoSection.setOrientation(LinearLayout.VERTICAL);
+        videoPreview=new VideoView(this);
+        videoPreview.setBackgroundColor(Color.rgb(12,16,32));
+        videoSection.addView(videoPreview,new LinearLayout.LayoutParams(-1,dp(330)));
+        videoPreview.setOnPreparedListener(player->{
+            player.setLooping(true);
+            player.setVolume(0f,0f);
+            if(videoPreviewOn)videoPreview.start();
+        });
+        videoPreview.setOnErrorListener((player,what,extra)->{
+            if(status!=null)status.setText("⚠ Не удалось воспроизвести этот MP4. Попробуй H.264.");
+            return true;
+        });
+        column.addView(videoSection);
+        TextView freeLabel=label("● Без сервера, без платных API · MP4 1–30 секунд",12,
+            Color.rgb(147,159,196),true);
+        addWithMargin(videoSection,freeLabel,0,dp(10),0,dp(7));
+
+        Button showPhotoTools=button("Дополнительно: фотоэффекты (не AI-видео) ▾",false);
+        addWithMargin(column,showPhotoTools,0,dp(14),0,dp(8));
+        LinearLayout photoSection=new LinearLayout(this);
+        photoSection.setOrientation(LinearLayout.VERTICAL);
+        photoSection.setVisibility(View.GONE);
+        column.addView(photoSection);
+        showPhotoTools.setOnClickListener(v->{
+            boolean open=photoSection.getVisibility()!=View.VISIBLE;
+            photoSection.setVisibility(open?View.VISIBLE:View.GONE);
+            showPhotoTools.setText(open?
+                "Скрыть фотоэффекты ▴":"Дополнительно: фотоэффекты (не AI-видео) ▾");
+        });
         preview=new PreviewView();
         GradientDrawable border=new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
             new int[]{Color.rgb(19,27,52),Color.rgb(13,15,34)});
         border.setCornerRadius(dp(20));
         preview.setBackground(border);preview.setClipToOutline(true);
-        column.addView(preview,new LinearLayout.LayoutParams(-1,dp(330)));
+        photoSection.addView(preview,new LinearLayout.LayoutParams(-1,dp(330)));
 
-        addWithMargin(column,label("ЭФФЕКТ  ·  БЕСШОВНЫЙ ЦИКЛ 8 СЕК",11,
+        addWithMargin(photoSection,label("ФОТОЭФФЕКТ  ·  НЕ НАСТОЯЩЕЕ ДВИЖЕНИЕ",11,
             Color.rgb(147,159,196),true),0,dp(13),0,dp(6));
         LinearLayout modes=new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
@@ -67,18 +103,18 @@ public final class MainActivity extends Activity {
         addMode(modes,nightButton);
         addMode(modes,rainButton);
         addMode(modes,neonButton);
-        column.addView(modes);
+        photoSection.addView(modes);
         nightButton.setOnClickListener(v->setMode(MotionSettings.NIGHT));
         rainButton.setOnClickListener(v->setMode(MotionSettings.RAIN));
         neonButton.setOnClickListener(v->setMode(MotionSettings.NEON));
         updateModeButtons();
 
         strengthCaption=label("",13,Color.rgb(181,189,207),false);
-        addWithMargin(column,strengthCaption,0,dp(10),0,0);
+        addWithMargin(photoSection,strengthCaption,0,dp(10),0,0);
         showStrength();
         SeekBar strength=new SeekBar(this);
         strength.setMax(80);strength.setProgress(settings.strength-20);
-        column.addView(strength);
+        photoSection.addView(strength);
         strength.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             @Override public void onProgressChanged(SeekBar seekBar,int progress,boolean fromUser){
                 if(!fromUser)return;
@@ -92,34 +128,37 @@ public final class MainActivity extends Activity {
         });
 
         chooseButton=button("1 · Выбрать фото машины",false);
-        addWithMargin(column,chooseButton,0,dp(8),0,0);
+        addWithMargin(photoSection,chooseButton,0,dp(8),0,0);
         chooseButton.setOnClickListener(v->pickPhoto());
         applyButton=button("2 · Установить живые обои",true);
-        addWithMargin(column,applyButton,0,dp(10),0,0);
+        addWithMargin(photoSection,applyButton,0,dp(10),0,0);
         applyButton.setOnClickListener(v->applyWallpaper());
 
-        // A real video is visibly different from animated photo effects.
-        // Prove smooth wallpaper playback before wiring any paid AI generator.
-        addWithMargin(column,label("НАСТОЯЩЕЕ ДВИЖЕНИЕ · MP4",12,
-            Color.rgb(178,153,255),true),0,dp(24),0,dp(6));
-        addWithMargin(column,label("Импортируй готовое видео, где машина действительно едет. Пока без генерации AI.",
-            13,Color.rgb(181,189,207),false),0,0,0,dp(8));
-        chooseVideoButton=button("3 · Выбрать видео машины (MP4)",false);
-        addWithMargin(column,chooseVideoButton,0,dp(4),0,0);
+        // Free video playback is a genuine product feature, but not yet an
+        // AI photo-to-video generator. Label this honestly.
+        addWithMargin(videoSection,label("Выбери MP4, где машина действительно едет. Генерация из одного фото пока не реализована.",
+            13,Color.rgb(181,189,207),false),0,dp(5),0,dp(8));
+        chooseVideoButton=button("1 · Выбрать видео автомобиля",false);
+        addWithMargin(videoSection,chooseVideoButton,0,dp(4),0,0);
         chooseVideoButton.setOnClickListener(v->pickVideo());
-        applyVideoButton=button("4 · Установить видеообои",true);
-        addWithMargin(column,applyVideoButton,0,dp(10),0,0);
+        applyVideoButton=button("2 · Установить живые видеообои",true);
+        addWithMargin(videoSection,applyVideoButton,0,dp(10),0,0);
         applyVideoButton.setOnClickListener(v->applyVideoWallpaper());
         applyVideoButton.setEnabled(VideoClipStore.get(this)!=null);
+        videoPreviewButton=button("▶ Смотреть выбранное видео",false);
+        addWithMargin(videoSection,videoPreviewButton,0,dp(10),0,0);
+        videoPreviewButton.setEnabled(VideoClipStore.get(this)!=null);
+        videoPreviewButton.setOnClickListener(v->playSelectedVideo());
         status=label("",13,Color.rgb(181,189,207),false);
         status.setGravity(Gravity.CENTER_HORIZONTAL);
         addWithMargin(column,status,0,dp(10),0,0);
-        TextView disclaimer=label("Фото сохраняется только на телефоне. Машина не вращает колёса и не ездит физически: движение создают камера, свет и атмосфера.",12,
+        TextView disclaimer=label("Все файлы остаются на телефоне. В первой бесплатной версии можно установить реальное MP4; AI-генерации движения из фото пока нет.",12,
             Color.rgb(123,139,165),false);
         disclaimer.setGravity(Gravity.CENTER_HORIZONTAL);
         addWithMargin(column,disclaimer,0,dp(9),0,0);
         setContentView(scroll);
         refreshPhoto();
+        if(VideoClipStore.get(this)!=null)playSelectedVideo();
     }
     private void addMode(LinearLayout parent,Button button){
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(54),1f);
@@ -162,6 +201,16 @@ public final class MainActivity extends Activity {
         bg.setColor(accent?Color.rgb(104,65,205):Color.rgb(39,48,71));
         bg.setCornerRadius(dp(16));result.setBackground(bg);
         result.setMinHeight(dp(60));return result;
+    }
+    private void playSelectedVideo(){
+        File file=VideoClipStore.get(this);
+        if(file==null){if(status!=null)status.setText("Сначала выбери MP4.");return;}
+        videoPreviewOn=true;
+        videoPreviewButton.setEnabled(true);
+        videoPreview.setVideoPath(file.getAbsolutePath());
+        videoPreview.requestFocus();
+        videoPreview.start();
+        if(status!=null)status.setText("▶ Настоящее видео: проверь движение автомобиля перед установкой.");
     }
     private void pickVideo(){
         if(busy)return;
@@ -208,7 +257,9 @@ public final class MainActivity extends Activity {
                     chooseVideoButton.setEnabled(true);
                     boolean loaded=VideoClipStore.get(this)!=null;
                     applyVideoButton.setEnabled(loaded);
+                    videoPreviewButton.setEnabled(loaded);
                     applyButton.setEnabled(preview.hasPhoto());
+                    if(finalError==null)playSelectedVideo();
                     status.setText(finalError==null?
                         "✅ MP4 сохранён локально. Можно установить настоящие видеообои.":
                         "Ошибка MP4: "+finalError);
@@ -259,6 +310,13 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         if(preview!=null)preview.invalidate();
+        if(videoPreviewOn&&videoPreview!=null&&VideoClipStore.get(this)!=null)
+            playSelectedVideo();
+    }
+    @Override protected void onPause(){
+        videoPreviewOn=false;
+        if(videoPreview!=null)videoPreview.stopPlayback();
+        super.onPause();
     }
     private final class PreviewView extends View{
         private final NightRideRenderer renderer=new NightRideRenderer();
@@ -266,7 +324,7 @@ public final class MainActivity extends Activity {
         private Bitmap image;
         private boolean attached;
         private final Runnable tick=()->{
-            if(attached&&getWindowVisibility()==View.VISIBLE){
+            if(attached&&isShown()&&getWindowVisibility()==View.VISIBLE){
                 invalidate();postDelayed(this.tick,MotionMath.frameDelay(false));
             }
         };
@@ -297,7 +355,7 @@ public final class MainActivity extends Activity {
         @Override protected void onWindowVisibilityChanged(int visibility){
             super.onWindowVisibilityChanged(visibility);
             removeCallbacks(tick);
-            if(attached&&visibility==View.VISIBLE)post(tick);
+            if(attached&&visibility==View.VISIBLE&&isShown())post(tick);
         }
     }
 }
