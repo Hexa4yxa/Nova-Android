@@ -29,6 +29,14 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Generate original free driving demo for signed APK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install --quiet Pillow
+          python3 motion-wall/demo/generate_demo.py motion-wall/app/src/main/assets/drive_demo.mp4
+          test -s motion-wall/app/src/main/assets/drive_demo.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 motion-wall/app/src/main/assets/drive_demo.mp4
       - name: Verify offline and framing regression tests
         run: cd motion-wall && bash tests/run_core_tests.sh
       - name: Verify permanent owner signing key and pinned public fingerprint
@@ -62,9 +70,11 @@ jobs:
           set -euo pipefail
           APK=motion-wall/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
+          unzip -l "$APK" | grep -F 'assets/drive_demo.mp4'
           TOOL="$ANDROID_HOME/build-tools/36.0.0"
-          "$TOOL/aapt" dump badging "$APK" | grep "package: name='ai.motionwall.cars' versionCode='2'"
+          "$TOOL/aapt" dump badging "$APK" | grep "package: name='ai.motionwall.cars' versionCode='3'"
           "$TOOL/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -F 'MotionWallpaperService'
+          "$TOOL/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -F 'MotionVideoWallpaperService'
           if "$TOOL/aapt" dump permissions "$APK" | grep -iE 'android.permission.(INTERNET|READ_MEDIA_IMAGES|READ_EXTERNAL_STORAGE)'; then
             echo "::error::Unexpected network or broad gallery permission"; exit 1
           fi
@@ -77,15 +87,15 @@ jobs:
             echo "::error::Signed APK certificate mismatch"; exit 1;
           }
           mkdir -p motion-wall/dist
-          cp "$APK" motion-wall/dist/Motion-Wall-Cars-v0.2-owner-signed.apk
-          (cd motion-wall/dist && sha256sum Motion-Wall-Cars-v0.2-owner-signed.apk > SHA256SUMS.txt)
-          echo "Signed candidate only. Android cannot update the initial ephemeral-debug-key install."
+          cp "$APK" motion-wall/dist/Motion-Wall-Cars-v0.3-free-owner-signed.apk
+          (cd motion-wall/dist && sha256sum Motion-Wall-Cars-v0.3-free-owner-signed.apk > SHA256SUMS.txt)
+          echo "Signed FREE candidate for upgrading v0.2 owner-signed in-place; initial v0.1 DEBUG still cannot upgrade due different key."
       - name: Upload one signed candidate - not a public release
         uses: actions/upload-artifact@v4
         with:
-          name: MOTION-WALL-CARS-v0.2-OWNER-SIGNED-CANDIDATE
+          name: MOTION-WALL-CARS-v0.3-FREE-OWNER-SIGNED-CANDIDATE
           path: |
-            motion-wall/dist/Motion-Wall-Cars-v0.2-owner-signed.apk
+            motion-wall/dist/Motion-Wall-Cars-v0.3-free-owner-signed.apk
             motion-wall/dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
