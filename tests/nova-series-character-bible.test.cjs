@@ -91,6 +91,63 @@ test('six-scene project binds a true multi-person series without Cyrillic in ima
  assert.throws(()=>director.setSceneCast('ep-one',2,[villain.id]),/уже нарисован/);
  assert.equal(director.read()[0].scenes[1].imageUri,saved[0].scenes[1].imageUri);
 });
+test('new mirror series automatically selects Mark and Reflection using scene beats, including doppelganger synonyms',()=>{
+ const {bible,director}=setup();
+ const series=bible.createSeries('Зеркало: Другая сторона','comic');
+ const mark=bible.addCharacter(series.id,{name:'Марк',role:'hero',
+  appearance:'young man, short dark hair, oval face, navy jacket and burgundy scarf'});
+ const reflection=bible.addCharacter(series.id,{name:'Отражение',role:'antagonist',
+  appearance:'pale mirror double of Mark, dark eyes and eerie smile'});
+ const beats=[
+  'Марк возвращается ночью домой и смотрит в старое зеркало.',
+  'Отражение начинает двигаться и улыбаться в старом зеркале.',
+  'Двойник пытается выбраться из зеркала, стремясь занять место Марка.',
+  'Марк пытается схватить отражение, но оно ускользает.',
+  'Двойник проникает сквозь стекло и касается реального Марка.',
+  'Отражение полностью вырывается из зеркала, заменяя Марка.'
+ ];
+ const story={id:'mirror-auto',title:'Зеркало',style:'cinematic graphic novel',
+  scenes:beats.map((beat,i)=>({number:i+1,beat,
+   sourcePrompt:'A man faces an old mirror in a gloomy apartment, cinematic framing and eerie light.',
+   prompt:'A man faces an old mirror in a gloomy apartment, cinematic framing and eerie light.',
+   imageUri:''}))};
+ director.bindSeries(story,bible.snapshot(series.id));
+ assert.deepEqual(Array.from(story.scenes,x=>Array.from(x.castIds)),
+  [[mark.id],[mark.id,reflection.id],[mark.id,reflection.id],[mark.id,reflection.id],
+   [mark.id,reflection.id],[mark.id,reflection.id]]);
+ assert.doesNotMatch(story.scenes[0].prompt,/eerie smile/);
+ assert.match(story.scenes[1].prompt,/eerie smile/);
+ assert.doesNotMatch(story.scenes[1].prompt,/[а-яёіїєґ]/iu);
+ assert.ok(director.write([story]));
+ director.setSceneCast('mirror-auto',3,[reflection.id]); // owner-approved override
+ const saved=director.read()[0];
+ saved.scenes[1].imageUri='content://media/external/images/media/123';
+ const before=JSON.stringify(saved.scenes);
+ director.bindSeries(saved,bible.snapshot(series.id)); // no destructive rebinding
+ assert.equal(JSON.stringify(saved.scenes),before);
+ assert.deepEqual(Array.from(saved.scenes[2].castIds),[reflection.id]);
+});
+test('casting recognises inflected names but never treats a bare mirror as an antagonist',()=>{
+ const {bible,director}=setup();
+ const series=bible.createSeries('Тест ролей','anime');
+ const mark=bible.addCharacter(series.id,{name:'Марк',role:'hero',
+  appearance:'short dark hair, grey blue eyes, pale face and navy jacket'});
+ const reflection=bible.addCharacter(series.id,{name:'Отражение',role:'antagonist',
+  appearance:'pale uncanny face, expressionless mirror copy and blue eyes'});
+ const lia=bible.addCharacter(series.id,{name:'Лия',role:'support',
+  appearance:'short silver hair, pale skin and red winter coat'});
+ const scenes=[
+  {beat:'Марк видит зеркало в пустой комнате.'},
+  {beat:'Марк протягивает руку к Лие, а двойник ждёт.'},
+  {beat:'Марк пытается удержать Лию, отражение смотрит на него.'}
+ ].map((scene,i)=>({...scene,number:i+1,
+  sourcePrompt:'A cinematic mirror portrait in a lonely room with dramatic midnight shadows.',
+  prompt:'A cinematic mirror portrait in a lonely room with dramatic midnight shadows.'}));
+ const story={id:'mirror-case',title:'Тест',style:'anime line art',scenes};
+ director.bindSeries(story,bible.snapshot(series.id));
+ assert.deepEqual(Array.from(story.scenes,x=>Array.from(x.castIds)),
+  [[mark.id],[mark.id,reflection.id,lia.id],[mark.id,reflection.id,lia.id]]);
+});
 test('existing legacy projects, gallery PNG and voice remain unchanged after series cast edits',()=>{
  const {bible,director}=setup();
  const old=director.parse(JSON.stringify(frames),original);old.id='legacy';
