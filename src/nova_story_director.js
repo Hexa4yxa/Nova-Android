@@ -167,7 +167,8 @@ function castPrompt(source,characters,style) {
  const comma=original.indexOf(',');
  const lead=clipWords(comma>0?original.slice(0,comma):original,120);
  const extra=comma>0?clipWords(original.slice(comma+1).trim(),65):'';
- const actors=characters.slice(0,3).map(x=>clean(x.name,36)+': '+clipWords(x.appearance,112));
+ const actors=characters.slice(0,3).map(x=>
+  (english(x.name)?clean(x.name,36)+': ':'')+clipWords(x.appearance,112));
  const cast=actors.length?', cast: '+actors.join('; '):', no characters visible';
  // SD1.5 CLIP context is short. Put selected actors BEFORE optional details.
  const result=lead+cast+', visual continuity: '+clipWords(style,75)+(extra?', '+extra:'');
